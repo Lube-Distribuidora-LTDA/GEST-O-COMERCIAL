@@ -59,6 +59,9 @@ L.irPara = function (id, params) {
 };
 
 function renderizar() {
+  // sem os dados (ainda carregando, ou a carga falhou) não há o que desenhar: quem explica é a tela de erro da carga,
+  // e não um "undefined" de dentro de uma página
+  if (!L.D) return;
   var pag = L.paginaAtual(), tok = ++tokRender, cont = L.$("conteudo");
   L.$("titulo").textContent = pag.titulo; L.$("olho").textContent = pag.olho || "";
   document.title = pag.titulo + " — Gestão Comercial · Lube";

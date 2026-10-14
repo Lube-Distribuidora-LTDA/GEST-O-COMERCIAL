@@ -198,7 +198,14 @@ L.versaoMudou = function () {
 };
 
 L.carregarJson = function (nome) {
-  return fetch("dados/" + nome).then(function (r) { if (!r.ok) throw new Error("Falta o arquivo dados/" + nome); return r.json(); });
+  return fetch("dados/" + nome).then(function (r) {
+    if (r.ok) return r.json();
+    // a função diz o motivo em JSON ({erro}); sem isso a tela só sabia que "faltou um arquivo"
+    return r.json().catch(function () { return {}; }).then(function (j) {
+      throw new Error(r.status === 401 ? "Sua sessão do Painel Lube expirou. Entre de novo pelo portal."
+        : "Os dados não carregaram (" + r.status + (j && j.erro ? ": " + j.erro : "") + "), arquivo dados/" + nome + ". Tente de novo em instantes; se persistir, fale com o TI.");
+    });
+  });
 };
 
 /* ------------------------------ dica (tooltip) ------------------------------ */
