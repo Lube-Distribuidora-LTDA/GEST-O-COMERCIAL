@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR" data-tema="escuro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="dark light">
+<title>Gestão Comercial — Lube Distribuidora</title>
+<link rel="icon" href="logo-lube.png">
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/paginas.css">
+<script>try { var t = localStorage.getItem("gc-tema"); if (t) document.documentElement.setAttribute("data-tema", t); } catch (e) {}</script>
+</head>
+<body>
+<div id="app">
+  <aside id="menu" aria-label="Menu">
+    <div class="marca">
+      <div class="placa"><img src="logo-lube.png" alt="Lube"></div>
+      <div class="nome">Gestão Comercial<small>Lube Distribuidora</small></div>
+    </div>
+    <nav id="menu-itens"></nav>
+    <div class="menu-rodape" id="menu-rodape"></div>
+  </aside>
+  <div id="coluna">
+    <header id="topo">
+      <button class="btn-ic btn-menu" id="btn-menu" aria-label="Abrir menu" title="Menu"></button>
+      <div class="tit"><div class="olho" id="olho"></div><h1 id="titulo">Gestão Comercial</h1></div>
+      <label class="busca-global" id="busca-box">
+        <span id="ic-busca"></span>
+        <input id="busca-global" type="search" placeholder="Buscar cliente, produto, fornecedor, RCA…" autocomplete="off" spellcheck="false">
+        <kbd>/</kbd>
+      </label>
+      <div class="acoes">
+        <button class="btn-ic" id="btn-apresentar" title="Modo apresentação (F)"></button>
+        <button class="btn-ic" id="btn-tema" title="Tema claro/escuro"></button>
+        <button class="btn-ic" id="btn-link" title="Copiar link desta visão"></button>
+        <button class="btn-ic" id="btn-atualizar" title="Atualizar dados"></button>
+      </div>
+    </header>
+    <div id="faixa-filtros"></div>
+    <main id="conteudo"></main>
+  </div>
+</div>
+<div id="dossie-fundo"></div>
+<aside id="dossie" aria-label="Relatório"></aside>
+<div id="dica"></div>
+<div id="toasts"></div>
+<div class="apr-dica"><span>Modo apresentação</span><span><kbd>←</kbd> <kbd>→</kbd> trocam de tela</span><span><kbd>Esc</kbd> sai</span></div>
+<script>window.VERSAO = "2026-10-14";</script>
+<script src="planilha.js"></script>
+<script src="js/nucleo.js"></script>
+<script src="js/graficos.js"></script>
+<script src="js/tabela.js"></script>
+<script src="js/componentes.js"></script>
+<script src="js/dados.js"></script>
+<script src="js/filtros.js"></script>
+<script src="js/dossie.js"></script>
+<script src="js/pag-vendas.js"></script>
+<script src="js/pag-vendas2.js"></script>
+<script src="js/pag-analise.js"></script>
+<script src="js/pag-carteira.js"></script>
+<script src="js/pag-estoque.js"></script>
+<script src="js/pag-compras.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

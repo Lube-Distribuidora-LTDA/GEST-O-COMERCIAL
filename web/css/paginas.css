@@ -1,0 +1,27 @@
+/* telas: mapa de calor, ajustes finos */
+.pagina.oculta { position: absolute; left: 28px; right: 28px; top: 22px; visibility: hidden; pointer-events: none; }
+#conteudo { position: relative; }
+.calor-box { overflow-x: auto; }
+table.calor { width: 100%; border-collapse: separate; border-spacing: 3px; font: 600 11.5px var(--f-num); }
+.calor th { color: var(--t3); font: 700 10.5px var(--f-txt); text-transform: uppercase; letter-spacing: .08em; padding: 4px 2px; text-align: center; }
+.calor tbody th { text-align: left; padding-right: 8px; font: 800 12px var(--f-num); letter-spacing: 0; color: var(--t2); }
+.calor td { text-align: center; padding: 9px 2px; border-radius: 7px; transition: transform .12s, box-shadow .12s; }
+.calor-box.interativo td { cursor: pointer; }
+.calor-box.interativo td:hover { transform: scale(1.06); box-shadow: 0 0 0 2px var(--ouro); }
+.calor-nota { font: 500 11.5px var(--f-txt); color: var(--t3); margin-top: 8px; }
+
+/* árvore comprador › fornecedor › produto */
+.arv-seta { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 6px; vertical-align: middle; transition: transform .16s; color: var(--t3); }
+.arv-seta svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.arv-seta.aberta { transform: rotate(90deg); color: var(--ouro); } .arv-seta.vazia { visibility: hidden; }
+.arv-nome { vertical-align: middle; } .arv-nome.forte { font-weight: 800; font-family: var(--f-tit); }
+.arv-abrir { border: 0; background: transparent; color: var(--t3); margin-left: 8px; width: 22px; height: 22px; border-radius: 6px; padding: 0; vertical-align: middle; opacity: 0; transition: opacity .15s; }
+.arv-abrir svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2.2; }
+tr:hover .arv-abrir { opacity: 1; } .arv-abrir:hover { color: var(--ouro); background: var(--ouro-dim); }
+.tabela tr.nv0 td { background: color-mix(in srgb, var(--s2) 70%, var(--s1)); font-weight: 700; }
+.tabela tr.nv2 td { color: var(--t2); font-weight: 500; }
+.tabela tr.tot td { background: var(--ouro-dim); font-weight: 800; border-bottom: 1px solid var(--ouro-linha); }
+
+.aviso-class { display: flex; align-items: center; gap: 14px; margin: 0 0 16px; padding: 12px 16px; border-radius: 12px; background: var(--info-bg); border: 1px solid color-mix(in srgb, var(--info) 40%, transparent); color: var(--t2); font: 500 13px/1.5 var(--f-txt); }
+.aviso-class svg { width: 20px; height: 20px; stroke: var(--info); fill: none; stroke-width: 2; flex: none; }
+.aviso-class b { color: var(--t1); } .aviso-class div { flex: 1; }

@@ -1,0 +1,19 @@
+{
+  "name": "gestao-comercial-trade",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gestao Comercial (Trade) - Lube Distribuidora",
+  "scripts": {
+    "start": "node servidor_local.js"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "@vercel/functions": "^3.10.1",
+    "pg": "^8.23.1"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.35.5"
+  }
+}

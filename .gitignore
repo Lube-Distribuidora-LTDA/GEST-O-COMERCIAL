@@ -1,0 +1,30 @@
+# ---------------------------------------------------------------------------
+# NUNCA versionar credenciais
+# ---------------------------------------------------------------------------
+ENV
+.env
+.env.*
+env
+!ENV.example
+*.pem
+*.key
+
+# ---------------------------------------------------------------------------
+# Pacote de dados: tem venda por cliente e por RCA (dado nominal da operação)
+# ---------------------------------------------------------------------------
+web/dados/
+etl/_cache_venda.bin
+*.log
+__pycache__/
+*.py[cod]
+.venv/
+
+# Web
+node_modules/
+.vercel/
+
+# Miniaturas das fotos (geradas pelo servidor a partir de FOTOS_ION)
+web/cache_img/
+
+# Credencial cifrada das fotos (so vale na maquina que a criou)
+*.cred

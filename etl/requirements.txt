@@ -1,0 +1,6 @@
+oracledb>=2.0.0
+python-dotenv>=1.0.0
+psycopg2-binary>=2.9.9
+openpyxl>=3.1.0
+# só para conferir contra o Power BI (conferir_power_bi.py), não é preciso na VM:
+# pandas>=2.0.0
