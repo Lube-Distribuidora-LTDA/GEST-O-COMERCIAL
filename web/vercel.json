@@ -4,10 +4,12 @@
   "functions": {
     "api/consulta.js": { "maxDuration": 60 },
     "api/versao.js": { "maxDuration": 60 },
-    "api/dados.js": { "maxDuration": 60 }
+    "api/dados.js": { "maxDuration": 60 },
+    "api/img.js": { "maxDuration": 15 }
   },
   "rewrites": [
-    { "source": "/dados/:nome", "destination": "/api/dados?nome=:nome" }
+    { "source": "/dados/:nome", "destination": "/api/dados?nome=:nome" },
+    { "source": "/img/:cod", "destination": "/api/img?cod=:cod" }
   ],
   "headers": [
     {

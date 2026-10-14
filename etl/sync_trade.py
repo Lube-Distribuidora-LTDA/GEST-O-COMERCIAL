@@ -13,6 +13,8 @@ Lê o WinThor (Oracle, SÓ LEITURA), a planilha de classificação do Trade e a 
     6. historico      foto de hoje da ruptura -> trade.historico_indicador
     7. bases          estoque / entradas / conta corrente -> trade.fato_*
     8. publicar       grava o pacote do painel e troca a versão no ar (trade.pacote, trade.pacote_versao)
+    9. miniaturas     fotos reduzidas (WebP 288 px) -> trade.produto_miniatura: é o que o painel da Vercel mostra
+                      (só o que mudou; com limite de tempo, para a tarefa agendada nunca estourar)
 
 Cada passo registra uma linha em trade.controle_carga: é essa tabela, e não o log na tela, que responde
 "a carga entrou?". Se um passo falhar, o painel continua com a versão anterior (nunca fica pela metade).
@@ -24,6 +26,7 @@ Como usar
     python sync_trade.py --arquivos      # além do banco, grava a cópia em ../web/dados (fallback do servidor local)
     python sync_trade.py --sem-gravar    # roda tudo, confere e NÃO grava nada no banco (teste)
     python sync_trade.py --listar        # mostra os passos e sai
+    python sync_trade.py --so-miniaturas --minutos-miniaturas 0   # só as fotos, sem Oracle e sem limite de tempo (1ª carga, à mão)
 
 Agendamento (ver 3 - INSTALACAO\\instalar_e_agendar.ps1): 5x ao dia, e é a tranca do banco que impede duas
 máquinas de carregarem ao mesmo tempo.
@@ -31,10 +34,12 @@ máquinas de carregarem ao mesmo tempo.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 import time
 from datetime import date
+from pathlib import Path
 
 import bi_comum as bi
 
@@ -54,6 +59,7 @@ PASSOS = (
     ("historico", "foto de hoje da ruptura -> trade.historico_indicador"),
     ("bases", "estoque, entradas e conta corrente -> trade.fato_*"),
     ("publicar", "grava o pacote do painel e troca a versão no ar"),
+    ("miniaturas", "fotos em miniatura -> trade.produto_miniatura (o que a Vercel mostra)"),
 )
 
 # Conferência antes de publicar: uma carga que vem muito menor que a no ar é quase sempre defeito da
@@ -69,6 +75,9 @@ def _argumentos() -> argparse.Namespace:
     p.add_argument("--arquivos", action="store_true", help="Também grava o pacote em ../web/dados.")
     p.add_argument("--sem-gravar", action="store_true", help="Roda e confere, mas não grava nada no banco.")
     p.add_argument("--listar", action="store_true", help="Mostra os passos e sai.")
+    p.add_argument("--so-miniaturas", action="store_true", help="Só indexa as fotos e gera as miniaturas (sem Oracle, sem pacote).")
+    p.add_argument("--sem-miniaturas", action="store_true", help="Não gera miniaturas nesta carga.")
+    p.add_argument("--minutos-miniaturas", type=float, default=10.0, help="Limite de tempo do passo das miniaturas, em minutos (0 = sem limite).")
     return p.parse_args()
 
 
@@ -132,9 +141,13 @@ def main() -> int:
             return False, None
 
     try:
-        with bi.conectar_oracle(cfg_ora) as conn_ora, bi.conectar_supabase(cfg_pg) as pg, bi.tranca_de_carga(pg, "carga"):
+        so_fotos = args.so_miniaturas
+        ora_ctx = contextlib.nullcontext() if so_fotos else bi.conectar_oracle(cfg_ora)       # só as fotos não precisa do Oracle
+        with ora_ctx as conn_ora, bi.conectar_supabase(cfg_pg) as pg, bi.tranca_de_carga(pg, "carga"):
             no_ar = gt.versao_no_ar(pg)
             meta_no_ar = (no_ar or {}).get("meta") or {}
+            classif = fonte_classif = cru = ora = pacote = None
+            ok_v = ok_o = False
 
             # ---- 1. classificação ------------------------------------------------
             def f_classif():
@@ -153,7 +166,7 @@ def main() -> int:
                 if not args.sem_gravar:
                     gt.gravar_classificacao(pg, novo, f"planilha {arq.name}")
                 return len(novo), None, (novo, f"planilha {arq.name}")
-            ok, val = passo(pg, "classificacao", f"{gt.SCHEMA}.classificacao_produto", f_classif)
+            ok, val = passo(pg, "classificacao", f"{gt.SCHEMA}.classificacao_produto", f_classif) if not so_fotos else (False, None)
             classif, fonte_classif = val if ok else (None, None)
 
             # ---- 2. imagens ---------------------------------------------------------
@@ -187,13 +200,12 @@ def main() -> int:
                     if args.guardar_cache:
                         et.salvar_cache(cru)
                 return len(cru["m"]), None, cru
-            ok_v, cru = passo(pg, "venda", None, f_venda, meta_no_ar.get("linhas_venda"))
+            ok_v, cru = passo(pg, "venda", None, f_venda, meta_no_ar.get("linhas_venda")) if not so_fotos else (False, None)
 
             # ---- 4. Oracle (resto) ------------------------------------------------------
             ok_o, ora = passo(pg, "oracle", None, lambda: (None, None, et.ler_oracle(conn_ora))) if ok_v else (False, None)
 
             # ---- 5. pacote (monta e confere) ---------------------------------------------
-            pacote = None
             if ok_v and ok_o and classif is not None and imagens is not None:
                 def f_pacote():
                     p = et.construir(cru, ora, classif, imagens, ref=date.today(),
@@ -212,7 +224,7 @@ def main() -> int:
                         raise RuntimeError("conferência reprovou, a versão no ar foi mantida: " + "; ".join(prob))
                     return p.n_venda, None, p
                 ok_p, pacote = passo(pg, "pacote", None, f_pacote, meta_no_ar.get("linhas_venda"))
-            else:
+            elif not so_fotos:
                 log.warning("Pulei o pacote: falta algum passo anterior.")
                 resultados.append(("pacote", "PULADO", None, 0.0, "passo anterior falhou"))
 
@@ -235,6 +247,31 @@ def main() -> int:
             elif pacote is not None:
                 log.info("--sem-gravar: pacote montado e conferido (%s linhas de venda, %s produtos em estoque); nada foi gravado.",
                          _fmt(pacote.n_venda), _fmt(len(pacote.est_out)))
+
+            # ---- 9. miniaturas (por último: nada do que o painel mostra espera por fotos) -----------------
+            if not args.sem_miniaturas and imagens is not None:
+                def f_miniaturas():
+                    import miniaturas as mi
+                    if fonte_imagens == "banco":
+                        return 0, "pasta de fotos fora do ar: miniaturas não atualizadas (valem as que já estão no banco)", None
+                    if not mi.disponivel():
+                        return 0, "falta o Pillow (python -m pip install pillow): miniaturas não atualizadas", None
+                    pend = mi.pendentes(imagens, gt.miniaturas_do_banco(pg))
+                    log.info("  %s foto(s) com miniatura nova ou desatualizada, de %s", _fmt(len(pend)), _fmt(len(imagens)))
+                    if args.sem_gravar:
+                        return len(pend), None, None
+                    limite = None if args.minutos_miniaturas <= 0 else args.minutos_miniaturas * 60
+                    r = mi.processar(Path(fonte_imagens), imagens, pend, lambda linhas: gt.gravar_miniaturas(pg, linhas), limite)
+                    removidas = gt.apagar_miniaturas_sem_foto(pg, list(imagens))
+                    avisos = []
+                    if r["restantes"]:
+                        avisos.append(f"faltam {_fmt(r['restantes'])} miniaturas (acabou o tempo; entram nas próximas cargas)")
+                    if r["falhas"]:
+                        avisos.append(f"{r['falhas']} foto(s) não puderam ser reduzidas, ex.: " + " | ".join(r["exemplos"][:3]))
+                    if removidas:
+                        log.info("  %s miniatura(s) de produto sem foto removida(s)", removidas)
+                    return r["feitas"], "; ".join(avisos) or None, r
+                passo(pg, "miniaturas", f"{gt.SCHEMA}.produto_miniatura", f_miniaturas)
 
             _resumo(resultados)
 

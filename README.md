@@ -80,7 +80,7 @@ P:\FOTOS_ION (fotos)  ────────┘   (SRV-IA, 5x ao dia)        (
 da versão no ar, ou o estoque com menos de 50%, recusa e mantém a versão anterior) · `historico` (a foto de hoje da ruptura →
 `historico_indicador`) · `bases` (`fato_estoque_produto`, `fato_entrada_mes`, `fato_cc_fornecedor`, `fato_cc_lancamento`) ·
 `publicar` (grava a versão nova do pacote **inteira, sem que ninguém a veja**, e só no fim troca o ponteiro `pacote_versao`
-numa transação; a versão anterior fica de reserva). Se a planilha do Trade ou a pasta de fotos estiverem fora do ar, o passo
+numa transação; a versão anterior fica de reserva) · `miniaturas` (fotos em WebP para o painel da Vercel; ver "As fotos na Vercel"). Se a planilha do Trade ou a pasta de fotos estiverem fora do ar, o passo
 termina em **AVISO** e usa a cópia que já está no banco: a carga não para por isso. A tranca de carga (advisory lock, de
 `bi_comum.py`) impede duas máquinas de carregarem ao mesmo tempo.
 
@@ -241,9 +241,17 @@ REPOSIÇÕES; quem cadastra é o Júlio; **variável nova só vale em deploy nov
 Sem elas a função responde 503 "dados indisponíveis". O guarda não precisa de variável (usa o OIDC do time); se
 `/.sentinela/saude` mostrar `"oidc": false`, o plano B é `SENTINELA_CHAVE` e `SENTINELA_PROJETO` (ver o `guarda/LEIA-ME.md` do portal).
 
-**O que não existe na Vercel:** as **fotos** dos produtos. A pasta fica na rede interna e a Vercel não a enxerga; a tela mostra o
-produto sem foto, e a página *Produtos sem imagem* continua certa (os marcadores vêm do ETL). A carga **não** roda na Vercel: é a tarefa
-`Trade - Sync` na `SRV-IA` (ver `P:\INTEGRAÇÃO BI\TRADE`), que grava no banco; a Vercel só lê.
+**As fotos na Vercel.** A pasta de fotos fica na rede interna e a Vercel não a enxerga. Quem enxerga é o ETL, que **reduz cada foto
+para uma miniatura WebP de 288 px (~11 KB; ~100 MB para as ~8,5 mil fotos) e guarda em `trade.produto_miniatura`**; a função `api/img`
+serve de lá (`/img/<código>` é reescrito para `/api/img?cod=<código>`), com cache só no navegador de quem entrou (`private`) e uma
+memória curta na instância. O marcador "tem foto" continua vindo do ETL (a página *Produtos sem imagem* usa ele). O passo
+`miniaturas` do `sync_trade.py` só gera a foto nova ou alterada (compara nome, tamanho e data do arquivo), roda **por último**, tem limite
+de 10 minutos por carga agendada (o que não deu tempo entra na próxima) e precisa do **Pillow** (`python -m pip install pillow`; sem ele
+termina em AVISO e a carga segue). A primeira carga (uns 4,3 GB de PNG) se faz à mão, de uma máquina que enxergue a pasta:
+`python sync_trade.py --so-miniaturas --minutos-miniaturas 0`. Para a carga **agendada** enxergar a pasta, falta o `fotos.cred` (ver "Fotos na
+tarefa agendada" acima); sem ele o passo avisa e vale o que já está no banco.
+
+A carga **não** roda na Vercel: é a tarefa `Trade - Sync` na `SRV-IA` (ver `P:\INTEGRAÇÃO BI\TRADE`), que grava no banco; a Vercel só lê.
 
 **Registro no Painel Lube** (feito pelo Claude em 2026-10-14, por SQL): a Sentinela só fecha um sistema que esteja em
 `sentinela.sistemas` com `exige_login = true`, e o portal só dá a permissão se ele estiver em `public.sistemas`. Projeto

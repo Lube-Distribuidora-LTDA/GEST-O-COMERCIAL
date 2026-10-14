@@ -92,6 +92,9 @@ def main() -> int:
         ok("credencial das fotos (fotos.cred) presente: a tarefa agendada consegue abrir o compartilhamento")
     else:
         log.info("  [--] sem fotos.cred: a tarefa agendada nao acessa a pasta de fotos (o passo imagens fica em AVISO); ver LEIA-ME")
+    import miniaturas as mi
+    (ok if mi.disponivel() else log.info)("Pillow presente: a carga gera as miniaturas das fotos" if mi.disponivel()
+                                          else "  [--] sem Pillow: as miniaturas das fotos nao sao atualizadas (python -m pip install pillow)")
     plan = et.achar_planilha_classificacao()
     if plan is None:
         ruim("planilha de classificacao do Trade nao encontrada (a carga usa a copia que ja esta no banco)")
@@ -111,7 +114,7 @@ def main() -> int:
                 return 1
             ok("schema trade existe")
             c = gt.contagens(pg)
-            for k in ("classificacao_produto", "produto_imagem", "historico_indicador", "fato_estoque_produto", "fato_entrada_mes",
+            for k in ("classificacao_produto", "produto_imagem", "produto_miniatura", "historico_indicador", "fato_estoque_produto", "fato_entrada_mes",
                       "fato_cc_fornecedor", "fato_cc_lancamento"):
                 (ok if c[k] > 0 else ruim)(f"{k}: {c[k]:,} linhas".replace(",", "."))
             v = gt.versao_no_ar(pg)

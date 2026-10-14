@@ -141,6 +141,40 @@ def gravar_imagens(conn, mapa: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Miniaturas das fotos (para o painel da Vercel, que não enxerga a pasta)
+# ---------------------------------------------------------------------------
+def miniaturas_do_banco(conn) -> dict:
+    """codprod -> (arquivo, bytes da origem, epoch da modificação da origem). Sem trazer a imagem."""
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT codprod, arquivo, origem_bytes, extract(epoch FROM origem_modificado)::bigint FROM {SCHEMA}.produto_miniatura")
+        out = {int(c): (a, b, e) for c, a, b, e in cur.fetchall()}
+    conn.rollback()
+    return out
+
+
+def gravar_miniaturas(conn, linhas: list) -> int:
+    """linhas: (codprod, arquivo, bytes_origem, modificado_iso, largura, altura, webp). Upsert por código."""
+    dados = [(c, a, b, m, w, h, psycopg2.Binary(img)) for c, a, b, m, w, h, img in linhas]
+    with conn.cursor() as cur:
+        psycopg2.extras.execute_values(
+            cur, f"INSERT INTO {SCHEMA}.produto_miniatura (codprod, arquivo, origem_bytes, origem_modificado, largura, altura, webp) VALUES %s "
+                 "ON CONFLICT (codprod) DO UPDATE SET arquivo = EXCLUDED.arquivo, origem_bytes = EXCLUDED.origem_bytes, "
+                 "origem_modificado = EXCLUDED.origem_modificado, largura = EXCLUDED.largura, altura = EXCLUDED.altura, "
+                 "webp = EXCLUDED.webp, atualizado_em = now()", dados, page_size=40)
+    conn.commit()
+    return len(dados)
+
+
+def apagar_miniaturas_sem_foto(conn, cods_com_foto: list) -> int:
+    """Tira a miniatura de produto que não tem mais foto na pasta."""
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {SCHEMA}.produto_miniatura WHERE codprod <> ALL(%s)", ([int(c) for c in cods_com_foto],))
+        n = cur.rowcount
+    conn.commit()
+    return n
+
+
+# ---------------------------------------------------------------------------
 # Histórico dos indicadores
 # ---------------------------------------------------------------------------
 def historico_do_banco(conn) -> list:
@@ -267,7 +301,7 @@ def ler_arquivo_do_pacote(conn, versao: str, nome: str) -> bytes:
 
 def contagens(conn) -> dict:
     """Linhas de cada tabela do schema, para o diagnóstico."""
-    tabelas = ("classificacao_produto", "produto_imagem", "historico_indicador", "fato_estoque_produto", "fato_entrada_mes",
+    tabelas = ("classificacao_produto", "produto_imagem", "produto_miniatura", "historico_indicador", "fato_estoque_produto", "fato_entrada_mes",
                "fato_cc_fornecedor", "fato_cc_lancamento", "pacote_versao", "controle_carga")
     out = {}
     with conn.cursor() as cur:

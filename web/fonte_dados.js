@@ -83,15 +83,33 @@ function conectar() {
   return pool;
 }
 
+/* Várias requisições dividem a conexão; na Vercel ela fecha quando a última termina (o session pooler tem poucas
+   conexões), sem uma requisição fechar o pool no meio da outra. */
+let emUso = 0;
+async function comConexao(fn) {
+  emUso++;
+  try { return await fn(conectar()); }
+  finally { if (--emUso === 0 && NA_VERCEL) await fechar(); }
+}
+
 /* a versão no ar (consulta levíssima; o servidor pergunta de tempos em tempos) */
-async function versaoNoAr() {
-  const r = await conectar().query(`SELECT versao, meta, arquivos FROM ${SCHEMA}.pacote_versao WHERE id = 1`);
-  return r.rows[0] || null;
+function versaoNoAr() {
+  return comConexao(async c => (await c.query(`SELECT versao, meta, arquivos FROM ${SCHEMA}.pacote_versao WHERE id = 1`)).rows[0] || null);
+}
+
+/* miniatura WebP da foto do produto (guardada pelo ETL em trade.produto_miniatura); null se não há */
+function miniatura(cod) {
+  return comConexao(async c => {
+    const r = await c.query(`SELECT webp FROM ${SCHEMA}.produto_miniatura WHERE codprod = $1`, [cod]);
+    return r.rows[0] ? r.rows[0].webp : null;
+  });
 }
 
 /* lê o pacote inteiro do banco. Devolve { origem, versao, arquivos: {nome: Buffer}, meta } onde os JSON já vêm
    descomprimidos e venda.bin.gz continua em gzip (é como o motor o lê). */
-async function carregarDoBanco() {
+function carregarDoBanco() { return comConexao(lerPacote); }
+
+async function lerPacote() {
   for (let tentativa = 0; tentativa < 3; tentativa++) {
     const v = await versaoNoAr();
     if (!v) throw new Error("o banco ainda não tem pacote (rode o sync_trade.py)");
@@ -126,6 +144,10 @@ function carregarDeArquivos(dir) {
   return { origem: "arquivos", versao: "arquivos@" + (meta.gerado_em || ""), arquivos, meta };
 }
 
-async function fechar() { if (pool) { await pool.end().catch(() => {}); pool = null; } }
+async function fechar() {
+  if (emUso > 0 || !pool) return;                       // alguém ainda está usando: quem sair por último fecha
+  const p = pool; pool = null;                           // tira antes de esperar: requisição nova abre um pool novo
+  await p.end().catch(() => {});
+}
 
-module.exports = { carregarDoBanco, carregarDeArquivos, versaoNoAr, fechar, acharEnv, variavel };
+module.exports = { carregarDoBanco, carregarDeArquivos, versaoNoAr, miniatura, fechar, acharEnv, variavel };

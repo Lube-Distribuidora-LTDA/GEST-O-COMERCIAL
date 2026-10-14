@@ -132,10 +132,16 @@ async function servirFoto(res, cod, w) {
   const e = P.estadoAtual();
   const nome = e && e.imagens[cod];
   const dir = pastaFotos();
-  if (!nome || !dir) { res.writeHead(404); return res.end(); }
-  const origem = path.join(dir, path.basename(nome));         // basename: o nome vem do banco e não pode sair da pasta
-  let st;
-  try { st = fs.statSync(origem); } catch (e2) { res.writeHead(404); return res.end(); }
+  const origem = nome && dir ? path.join(dir, path.basename(nome)) : null;     // basename: o nome vem do banco e não pode sair da pasta
+  let st = null;
+  if (origem) { try { st = fs.statSync(origem); } catch (e2) { st = null; } }
+  if (!st) {                                                    // pasta fora do ar nesta máquina: a miniatura que o ETL guardou no banco
+    try {
+      const webp = nome ? await fonte.miniatura(cod) : null;
+      if (webp) { res.writeHead(200, { "Content-Type": "image/webp", "Cache-Control": "public, max-age=3600" }); return res.end(webp); }
+    } catch (e4) { console.error(`[foto ${cod}] miniatura do banco falhou:`, e4.message); }
+    res.writeHead(404); return res.end();
+  }
   if (sharp) {
     try {
       const arq = await miniatura(origem, st.mtimeMs, cod, w);
