@@ -169,6 +169,14 @@ L.tabela = function (cfg) {
           var bx = L.h("span", { class: "bx", style: { "--p": (v > 0 ? Math.max(1, v / maxCol[c.id] * 100) : 0).toFixed(1) + "%", "--cor-barra": c.corBarra || "" } });
           bx.appendChild(inner); td.appendChild(bx);
         } else td.appendChild(inner);
+        if (cfg.foto && c.id === (cfg.fotoColuna || vis[0].id)) {      // miniatura do produto antes do nome
+          var pf = cfg.foto(r);
+          if (pf != null && pf >= 0) {
+            var w = L.h("span", { class: "cel-foto" }, L.fotoMini(pf)), tx = L.h("span", { class: "cel-txt" });
+            while (td.firstChild) tx.appendChild(td.firstChild);
+            w.appendChild(tx); td.appendChild(w);
+          }
+        }
         if (c.titleTd) td.title = c.titleTd(r);
         else if (c.tipo === "texto" && typeof txt === "string" && txt.length > 28) td.title = txt;
         linha.appendChild(td);

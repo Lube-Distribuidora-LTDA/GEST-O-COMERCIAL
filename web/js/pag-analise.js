@@ -59,6 +59,7 @@ L.registrarPagina({
           { id: "kg", titulo: "R$/kg", tipo: "num2", ord: false, valor: function (r) { return r.peso ? r.venda / r.peso : null; }, essencial: false },
         ].filter(Boolean),
         totais: function (res) { return [{ rot: "Venda líquida", valor: L.fBRL(at.venda, 0), pri: true }, { rot: rot + "s com venda", valor: L.fInt(res.total) }, { rot: "Positivação", valor: L.fInt(at.pos) }, { rot: "Ticket médio", valor: L.fBRL(at.ticket, 0) }, { rot: "Devolução", valor: L.fBRL(at.dev, 0) }]; },
+        foto: por === "produto" ? function (r) { return r.id; } : null,
         aoClicar: function (r, ev) { if (por === "ym") L.abrirDossie({ dim: "ym", id: r.id }); else L.cliqueDim(por, r.id, ev); },
         carregar: function (e) {
           var ordId = e.ord && MEDIDA_ORD[e.ord.id] ? MEDIDA_ORD[e.ord.id] : "venda";
@@ -154,6 +155,7 @@ L.registrarPagina({
           { id: "qtd", titulo: "Quantidade", tipo: "inteiro", ord: false, valor: function (r) { return r.qtd; }, essencial: false },
         ],
         totais: function (r) { return [{ rot: "Itens na lista", valor: L.fInt(r.total), pri: true }, { rot: "Venda líquida total", valor: L.fBRL(total, 0) }]; },
+        foto: por === "produto" ? function (r) { return r.id; } : null, fotoColuna: "nome",
         aoClicar: function (r, ev) { L.cliqueDim(por, r.id, ev); },
         carregar: function (e) {
           return L.consultar([{ id: "a", tipo: "abc", por: por, classe: classe, busca: e.busca || undefined, limite: e.porPag || (e.exportando ? 60000 : undefined), offset: e.porPag ? e.pag * e.porPag : 0 }], { canal: "tabela-abc" }).then(function (jj) {

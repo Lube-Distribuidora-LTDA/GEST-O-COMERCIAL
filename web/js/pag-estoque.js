@@ -38,6 +38,7 @@ L.arvore = function (cfg) {
     var temFilhos = !!filhos;
     var seta = L.h("span", { class: "arv-seta" + (temFilhos ? "" : " vazia"), html: temFilhos ? L.ic("dir") : "" });
     td.appendChild(seta);
+    if (dim === "produto") td.appendChild(L.fotoMini(id));
     td.appendChild(L.h("span", { class: "arv-nome" + (nivel === 0 ? " forte" : ""), text: nome, title: nome }));
     var go = L.h("button", { class: "arv-abrir", type: "button", title: "Abrir o relatório", html: L.ic("externo"), onclick: function (ev) { ev.stopPropagation(); L.cliqueDim(dim, id, ev); } });
     td.appendChild(go); tr.appendChild(td);
@@ -155,6 +156,7 @@ L.registrarPagina({
         { id: "pend", titulo: "Pedido pendente", tipo: "inteiro", valor: function (r) { return r.pend; }, essencial: false },
         { id: "tot", titulo: "Estoque", tipo: "inteiro", valor: function (r) { return r.total; }, essencial: false },
       ],
+      foto: function (r) { return r.p; },
       aoClicar: function (r, ev) { L.cliqueDim2("produto", r.p, ev); },
       totais: function (res) { return [{ rot: "Itens em ruptura", valor: L.fInt(res.total), pri: true }, { rot: "Venda perdida por semana", valor: L.fBRL(perdida, 0) }, { rot: "Com pedido pendente", valor: L.fInt(linhasP.filter(function (e) { return e.pend > 0; }).length) }]; },
     });
@@ -239,6 +241,7 @@ L.registrarPagina({
         { id: "ult", titulo: "Última entrada", tipo: "data", valor: function (r) { return r.ult; } },
         { id: "pf", titulo: "Preço de venda", tipo: "moeda", valor: function (r) { return r.preco; }, essencial: false },
       ],
+      foto: function (r) { return r.p; },
       aoClicar: function (r, ev) { L.cliqueDim2("produto", r.p, ev); },
       totais: function (res) { return [{ rot: "Itens sem venda", valor: L.fInt(res.total), pri: true }, { rot: "Valor parado", valor: fBR0(valor) }, { rot: "Base de valor", valor: L.estado.baseValor === "pf" ? "Preço ÷ 1,35" : "Custo real" }]; },
     });
@@ -370,6 +373,7 @@ L.registrarPagina({
         { id: "dep", titulo: "Departamento", tipo: "texto", valor: function (r) { return L.nomeDe("depto", r.depto); }, essencial: false },
         { id: "img", titulo: "Imagem", tipo: "tag", valor: function (r) { return r.img ? "SIM" : "NÃO"; }, fmt: function (v) { return { html: L.tag(v === "SIM" ? "Sim" : "Não", v === "SIM" ? "ok" : "atencao") }; } },
       ],
+      foto: function (r) { return r.p; },
       aoClicar: function (r, ev) { L.cliqueDim2("produto", r.p, ev); },
       totais: function (res) { return [{ rot: "Produtos na lista", valor: L.fInt(res.total), pri: true }, { rot: "% com imagem", valor: L.fPct(pct, 1) }]; },
     });

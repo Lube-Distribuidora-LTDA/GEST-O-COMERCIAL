@@ -251,6 +251,7 @@ L.registrarPagina({
         { id: "qtd", titulo: "Quantidade", tipo: "inteiro", valor: function (r) { return r.qtd; }, essencial: false },
         { id: "ult", titulo: "Última compra", tipo: "texto", valor: function (r) { return L.fMesAno(r.ult.slice(0, 7)); }, ordVal: function (r) { return r.ult; }, essencial: false },
       ],
+      foto: function (r) { return r.p; },
       aoClicar: function (r, ev) { L.cliqueDim2("produto", r.p, ev); },
       totais: function (res) { return [{ rot: "Produtos", valor: L.fInt(res.total), pri: true }, { rot: "Valor comprado", valor: fBR0(valorTot) }, { rot: "Variação do custo", valor: (ultimo - 100 > 0 ? "+" : "") + L.fNum(ultimo - 100, 1) + "%" }];  },
     });

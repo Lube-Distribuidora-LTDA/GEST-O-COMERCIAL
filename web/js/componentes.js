@@ -7,6 +7,30 @@
 var L = window.L;
 
 L.secao = function (texto) { return L.h("div", { class: "sec-tit", text: texto }); };
+
+/* miniatura do produto (índice p de D.produtos): quadradinho branco com a foto; passando o mouse, abre a foto maior.
+   Produto sem foto fica com um quadradinho cinza, para as linhas não ficarem desalinhadas. */
+var zoomFoto = null;
+function fecharZoomFoto() { if (zoomFoto) { zoomFoto.remove(); zoomFoto = null; } }
+L.fotoMini = function (p) {
+  var e = L.ESTp && L.ESTp[p], d = L.D && L.D.produtos && L.D.produtos[p], cod = d ? d[0] : null;
+  var box = L.h("span", { class: "foto-mini" });
+  if (!(e && e.img) || cod == null) { box.classList.add("sem"); box.innerHTML = L.ic("imagem"); box.title = "Sem foto na pasta FOTOS_ION"; return box; }
+  var url = "img/" + encodeURIComponent(cod);
+  var im = L.h("img", { src: url, alt: "", loading: "lazy", decoding: "async" });
+  im.addEventListener("error", function () { box.classList.add("sem"); box.innerHTML = L.ic("imagem"); box.onmouseenter = null; });
+  box.appendChild(im);
+  box.onmouseenter = function () {
+    fecharZoomFoto();
+    var r = box.getBoundingClientRect(), t = 232, esq = r.right + 12 + t > innerWidth ? r.left - 12 - t : r.right + 12, topo = Math.max(8, Math.min(innerHeight - t - 8, r.top + r.height / 2 - t / 2));
+    zoomFoto = L.h("div", { class: "foto-zoom", style: { left: Math.max(8, esq) + "px", top: topo + "px" } }, L.h("img", { src: url, alt: "" }));
+    document.body.appendChild(zoomFoto);
+  };
+  box.onmouseleave = fecharZoomFoto;
+  return box;
+};
+window.addEventListener("scroll", fecharZoomFoto, true);
+window.addEventListener("mousedown", fecharZoomFoto, true);
 L.grade = function () { var g = L.h("div", { class: "grade" }); for (var i = 0; i < arguments.length; i++) L.add(g, arguments[i]); return g; };
 
 /* painel: cfg { titulo, sub, classe, acoes, corpo, semPad, id } — devolve o elemento; el.corpo é onde o gráfico entra */

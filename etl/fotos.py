@@ -69,7 +69,11 @@ def localizar_pasta(extra: str | None = None, relatorio: list | None = None) -> 
         return achada
 
     cred = Path(os.environ.get("TRADE_FOTOS_CREDENCIAL") or (Path(__file__).resolve().parent / "fotos.cred"))
-    if os.name != "nt" or not cred.is_file():
+    if os.name != "nt":
+        return None
+    if not cred.is_file():
+        if relatorio is not None:
+            relatorio.append((str(cred), "arquivo da credencial não existe nesta máquina/pasta (fotos.cred é por conta e por máquina)"))
         return None
     servidor = os.environ.get("TRADE_FOTOS_SERVIDOR")
     usuario = os.environ.get("TRADE_FOTOS_USUARIO")
