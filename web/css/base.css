@@ -376,8 +376,35 @@ table.tabela { border-collapse: separate; border-spacing: 0; width: 100%; font: 
 /* ============================ estados da tela ============================ */
 .esqueleto { background: linear-gradient(90deg, var(--s2), var(--s3), var(--s2)); background-size: 220% 100%; animation: brilha 1.4s linear infinite; border-radius: 10px; }
 @keyframes brilha { to { background-position: -220% 0; } }
-.espera { display: grid; place-items: center; min-height: 340px; text-align: center; color: var(--t3); gap: 14px; }
-.espera .relogio { font: 800 34px var(--f-num); color: var(--ouro); }
+.espera { display: grid; place-items: center; align-content: center; min-height: 340px; text-align: center; color: var(--t3); gap: 6px; padding: 18px 0; }
+.espera .relogio { font: 800 20px var(--f-num); color: var(--ouro); margin-top: 4px; }
+.espera-txt { font: 600 13.5px var(--f-txt); letter-spacing: .01em; }
+
+/* caminhão da Lube na espera: estrada correndo, rodas girando, painéis caindo no baú */
+.cam-cena { width: min(100%, 440px); margin: 0 auto; }
+.cam-cena svg { width: 100%; height: auto; display: block; overflow: visible; }
+.cam-corpo { animation: cam-bob .36s ease-in-out infinite alternate; }
+@keyframes cam-bob { from { transform: translateY(0); } to { transform: translateY(-2.5px); } }
+.cam-raio { transform-box: fill-box; transform-origin: 50% 50%; animation: cam-gira .5s linear infinite; }
+@keyframes cam-gira { to { transform: rotate(360deg); } }
+.cam-estrada { animation: cam-corre .5s linear infinite; }
+@keyframes cam-corre { to { stroke-dashoffset: -52; } }
+.cam-vento line { animation: cam-vento .7s linear infinite; }
+.cam-vento line:nth-child(2) { animation-delay: .22s; } .cam-vento line:nth-child(3) { animation-delay: .44s; }
+@keyframes cam-vento { 0% { transform: translateX(0); opacity: .15; } 45% { opacity: .95; } 100% { transform: translateX(-34px); opacity: 0; } }
+.cam-painel { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; animation: cam-cai 3.6s cubic-bezier(.5, 0, .6, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes cam-cai {
+  0% { transform: translateY(-120px) rotate(-7deg); opacity: 0; }
+  10% { opacity: 1; }
+  56% { transform: translateY(76px) rotate(0deg); opacity: 1; }
+  57%, 100% { transform: translateY(76px); opacity: 0; }
+}
+.cam-pulso { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; animation: cam-brilho 3.6s ease-out infinite; animation-delay: var(--d, 0s); }
+@keyframes cam-brilho { 0%, 52% { opacity: 0; transform: scale(.25); } 56% { opacity: .95; transform: scale(.45); } 78% { opacity: 0; transform: scale(1.25); } 100% { opacity: 0; transform: scale(1.25); } }
+@media (prefers-reduced-motion: reduce) {
+  .cam-corpo, .cam-raio, .cam-estrada, .cam-vento line, .cam-pulso { animation: none; }
+  .cam-painel { animation: none; opacity: 1; transform: translateY(-14px); }
+}
 .vazio { padding: 36px 18px; text-align: center; color: var(--t3); font: 500 13px var(--f-txt); }
 .vazio b { display: block; color: var(--t2); font: 700 14px var(--f-tit); margin-bottom: 4px; }
 #toasts { position: fixed; right: 22px; bottom: 22px; z-index: 200; display: grid; gap: 10px; }
