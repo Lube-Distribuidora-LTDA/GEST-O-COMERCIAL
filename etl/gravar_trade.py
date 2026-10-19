@@ -9,9 +9,14 @@ O que mora lá (ver web/db/01-schema.sql):
   • SAÍDAS: bases pequenas (estoque, entradas, conta corrente) e o PACOTE do painel — o arquivo de
     venda colunar e os JSONs, comprimidos e guardados em pedaços na tabela `pacote`.
 
-Regra do pacote: grava a versão nova inteira, ARQUIVO POR ARQUIVO, sem que ninguém a enxergue; só
-no fim troca o ponteiro `pacote_versao` numa transação única. Quem está lendo a versão antiga continua
+Regra do pacote: grava o que mudou da versão nova, PEDAÇO POR PEDAÇO, sem que ninguém a enxergue; só no
+fim troca o ponteiro `pacote_versao` numa transação curta. Quem está lendo a versão antiga continua
 lendo; quem abre depois lê a nova. A versão anterior é mantida de reserva.
+
+Arquivo que não mudou desde a versão no ar (mesmo sha1) não é gravado de novo: a versão nova aponta para os
+pedaços que já estão no banco (`versao_dados` em `pacote_versao.arquivos`). O venda.bin.gz (~25 MB) quase
+nunca muda de uma carga para a outra no mesmo dia, e era ele que fazia o `publicar` levar minutos (e
+estourar o limite de tempo do banco, em 2026-10-16).
 """
 from __future__ import annotations
 
@@ -19,6 +24,7 @@ import gzip
 import hashlib
 import json
 import logging
+import time
 from datetime import date, datetime, timezone
 
 import psycopg2
@@ -31,6 +37,14 @@ log = logging.getLogger("bi")
 SCHEMA = "trade"
 REF_DW = "ivcnotrynogaljrvvyes"            # projeto DATA WAREHOUSE do Supabase
 TAM_PARTE = 4 * 1024 * 1024                # pedaço do pacote: 4 MB
+
+# Gravações grandes (bases, pacote): a conexão padrão corta cada comando aos 120 s (bi_comum), e o banco do Supabase
+# às vezes engasga por minutos. Aqui o limite é folgado por transação (SET LOCAL, só vale nela) e cada gravação
+# tem até 3 tentativas, com pausa. Cada tentativa é uma transação inteira: o que falhou é desfeito, nunca fica pela metade.
+LIMITE_GRAVACAO = "900s"
+TENTATIVAS_GRAVACAO = 3
+PAUSAS_GRAVACAO = (5, 20)                  # segundos antes da 2ª e da 3ª tentativa
+ESTATISTICA = {"repeticoes": 0}            # quantas gravações precisaram ser repetidas nesta carga
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +107,41 @@ def registrar(conn, consulta: str, destino: str | None, status: str, linhas: int
     except psycopg2.Error:
         conn.rollback()
         log.warning("Não consegui gravar o controle de carga de %s.", consulta)
+
+
+def _tentar(conn, o_que: str, fn, tentativas: int = TENTATIVAS_GRAVACAO, limite: str = LIMITE_GRAVACAO):
+    """Roda `fn(cur)` numa transação com limite de tempo folgado e confirma; se o banco cortar por tempo ou engasgar,
+    desfaz e repete (até `tentativas`, com pausa). Devolve o que `fn` devolver.
+
+    Só repete erro do tipo "o banco demorou / cortou" (OperationalError, que inclui QueryCanceled). Se a conexão caiu,
+    ou se o erro é outro (dado inválido, tabela faltando), o erro sobe na hora: repetir não adianta e o passo vira ERRO,
+    com a versão no ar intacta. `fn` tem que poder ser refeita do zero: a transação anterior foi desfeita.
+    """
+    for n in range(1, tentativas + 1):
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"SET LOCAL statement_timeout = '{limite}'")
+                resultado = fn(cur)
+            conn.commit()
+            return resultado
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001 — conexão morta: o rollback também falha
+                pass
+            if conn.closed or n >= tentativas:
+                raise
+            pausa = PAUSAS_GRAVACAO[min(n - 1, len(PAUSAS_GRAVACAO) - 1)]
+            ESTATISTICA["repeticoes"] += 1
+            log.warning("  %s: o banco demorou ou cortou (%s); tentativa %d de %d, repito em %d s",
+                        o_que, type(exc).__name__, n, tentativas, pausa)
+            time.sleep(pausa)
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -191,12 +240,13 @@ def gravar_historico(conn, hist_hoje: list) -> int:
     if not hist_hoje:
         return 0
     dia = hist_hoje[0][0]
-    with conn.cursor() as cur:
+
+    def _gravar(cur):
         cur.execute(f"DELETE FROM {SCHEMA}.historico_indicador WHERE data = %s", (dia,))
         psycopg2.extras.execute_values(
             cur, f"INSERT INTO {SCHEMA}.historico_indicador (data, codcomprador, comprador, ativos, skus, rupturas, sem_venda, valor_parado, valor_parado_pf) VALUES %s",
             hist_hoje)
-    conn.commit()
+    _tentar(conn, "histórico", _gravar)
     return len(hist_hoje)
 
 
@@ -229,7 +279,7 @@ def gravar_bases(conn, p) -> dict:
     lan = [(r[7], r[0], r[1], "D" if r[2] == 0 else "C", r[3], r[4], r[5], usuarios[r[6]], bool(r[8]), bool(r[9]))
            for r in p.cc["lancamentos"]]
 
-    with conn.cursor() as cur:
+    def _gravar(cur):
         cur.execute(f"TRUNCATE {SCHEMA}.fato_estoque_produto, {SCHEMA}.fato_entrada_mes, {SCHEMA}.fato_cc_fornecedor, "
                     f"{SCHEMA}.fato_cc_lancamento RESTART IDENTITY")
         psycopg2.extras.execute_values(
@@ -246,7 +296,7 @@ def gravar_bases(conn, p) -> dict:
         psycopg2.extras.execute_values(
             cur, f"INSERT INTO {SCHEMA}.fato_cc_lancamento (transacao, data, codfornec, tipo, valor, historico, numverba, usuario, negociacao, estorno) "
                  "VALUES %s", lan, page_size=5000)
-    conn.commit()
+    _tentar(conn, "bases", _gravar)                # as tabelas são trocadas por inteiro: refazer do zero é seguro
     return {"fato_estoque_produto": len(est), "fato_entrada_mes": len(ent), "fato_cc_fornecedor": len(ccf), "fato_cc_lancamento": len(lan)}
 
 
@@ -263,37 +313,104 @@ def versao_no_ar(conn) -> dict | None:
     return {"versao": r[0], "gerado_em": r[1], "meta": r[2], "arquivos": r[3]}
 
 
+def _dados_reaproveitaveis(conn, anterior: dict | None, nome: str, info: dict) -> str | None:
+    """Se o arquivo é igual ao da versão no ar (mesmo sha1, tamanho e nº de pedaços) E os pedaços estão mesmo no banco,
+    devolve a versão onde eles moram; senão, None (grava de novo)."""
+    ant = ((anterior or {}).get("arquivos") or {}).get(nome)
+    if not ant or (ant.get("sha1"), ant.get("bytes"), ant.get("partes")) != (info["sha1"], info["bytes"], info["partes"]):
+        return None
+    onde = ant.get("versao_dados") or anterior["versao"]
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT count(*), coalesce(sum(octet_length(dados)), 0) FROM {SCHEMA}.pacote WHERE versao = %s AND nome = %s", (onde, nome))
+        n, tam = cur.fetchone()
+    conn.rollback()
+    return onde if n == info["partes"] and int(tam) == info["bytes"] else None
+
+
+def _limpar_pacotes_velhos(conn, necessarios: set) -> int:
+    """Apaga do banco os (versão, arquivo) que nem a versão nova nem a anterior (a reserva) usam. É "se der":
+    roda DEPOIS de a versão nova estar no ar, e uma falha aqui só deixa o lixo para a próxima carga limpar."""
+    apagados = 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT DISTINCT versao, nome FROM {SCHEMA}.pacote")
+            existentes = cur.fetchall()
+        conn.rollback()
+        for v, n in existentes:
+            if (v, n) in necessarios:
+                continue
+            try:
+                _tentar(conn, f"apagar {n} da versão {v}",
+                        lambda cur, v=v, n=n: cur.execute(f"DELETE FROM {SCHEMA}.pacote WHERE versao = %s AND nome = %s", (v, n)), tentativas=2)
+                apagados += 1
+            except Exception as exc:  # noqa: BLE001
+                log.warning("  não consegui apagar %s da versão %s agora (%s: %s); a próxima carga tenta de novo", n, v, type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        log.warning("  limpeza das versões velhas do pacote adiada (%s: %s)", type(exc).__name__, exc)
+    return apagados
+
+
 def gravar_pacote(conn, blobs: dict, meta: dict) -> dict:
-    """Grava todos os arquivos da versão nova e só então troca o ponteiro. Devolve {versao, arquivos}."""
+    """Grava o que mudou da versão nova e só então troca o ponteiro. Devolve {versao, arquivos, gravados, reaproveitados}.
+
+    `arquivos[nome]` = {partes, bytes, sha1, versao_dados}: `versao_dados` é a versão cujos pedaços guardam esse arquivo
+    (a própria versão nova, ou a que já estava no ar quando o arquivo não mudou). Quem lê usa `versao_dados`.
+    """
+    ESTATISTICA["repeticoes"] = 0
     versao = datetime.now().strftime("%Y%m%d-%H%M%S")
     anterior = versao_no_ar(conn)
-    arquivos = {}
+    arquivos, gravados, reaproveitados = {}, [], []
     for nome, dados in blobs.items():
         gz = dados if nome.endswith(".gz") else gzip.compress(dados, compresslevel=6, mtime=0)
         partes = [gz[i:i + TAM_PARTE] for i in range(0, len(gz), TAM_PARTE)] or [b""]
-        with conn.cursor() as cur:
-            for n, parte in enumerate(partes):
-                cur.execute(f"INSERT INTO {SCHEMA}.pacote (versao, nome, parte, dados) VALUES (%s,%s,%s,%s)",
-                            (versao, nome, n, psycopg2.Binary(parte)))
-        conn.commit()                              # cada arquivo na sua transação: o banco não segura 30 MB de uma vez
-        arquivos[nome] = {"partes": len(partes), "bytes": len(gz), "sha1": hashlib.sha1(gz).hexdigest()}
-        log.info("  pacote %-14s %7.1f MB em %d parte(s)", nome, len(gz) / 1e6, len(partes))
-    manter = [versao] + ([anterior["versao"]] if anterior else [])
-    with conn.cursor() as cur:
+        info = {"partes": len(partes), "bytes": len(gz), "sha1": hashlib.sha1(gz).hexdigest()}
+        onde = _dados_reaproveitaveis(conn, anterior, nome, info)
+        if onde:
+            info["versao_dados"] = onde
+            reaproveitados.append(nome)
+            log.info("  pacote %-14s %7.1f MB igual ao no ar: reaproveitado (pedaços da versão %s)", nome, len(gz) / 1e6, onde)
+        else:
+            for n, parte in enumerate(partes):          # cada pedaço na sua transação: o banco não segura 25 MB de uma vez
+                _tentar(conn, f"{nome}, pedaço {n + 1} de {len(partes)}",
+                        lambda cur, n=n, parte=parte: cur.execute(
+                            f"INSERT INTO {SCHEMA}.pacote (versao, nome, parte, dados) VALUES (%s,%s,%s,%s) "
+                            "ON CONFLICT (versao, nome, parte) DO UPDATE SET dados = EXCLUDED.dados",
+                            (versao, nome, n, psycopg2.Binary(parte))))
+            info["versao_dados"] = versao
+            gravados.append(nome)
+            log.info("  pacote %-14s %7.1f MB gravado em %d pedaço(s)", nome, len(gz) / 1e6, len(partes))
+        arquivos[nome] = info
+
+    def _trocar(cur):                                   # a única coisa que o painel enxerga: uma linha, uma transação curta
         cur.execute(
             f"INSERT INTO {SCHEMA}.pacote_versao (id, versao, gerado_em, meta, arquivos, atualizado_em) VALUES (1,%s,%s,%s,%s,now()) "
             "ON CONFLICT (id) DO UPDATE SET versao = EXCLUDED.versao, gerado_em = EXCLUDED.gerado_em, meta = EXCLUDED.meta, "
             "arquivos = EXCLUDED.arquivos, atualizado_em = now()",
             (versao, datetime.now(timezone.utc), json.dumps(meta), json.dumps(arquivos)))    # o meta.gerado_em é hora local sem fuso, para exibir
-        cur.execute(f"DELETE FROM {SCHEMA}.pacote WHERE versao <> ALL(%s)", (manter,))   # fica a nova e a anterior (reserva)
-    conn.commit()
-    return {"versao": versao, "arquivos": arquivos}
+    _tentar(conn, "trocar a versão no ar", _trocar)
+
+    # fica o que a nova usa e o que a anterior usava (reserva); o resto vai embora, depois, sem derrubar a carga
+    necessarios = {(i["versao_dados"], n) for n, i in arquivos.items()}
+    for n, i in ((anterior or {}).get("arquivos") or {}).items():
+        necessarios.add((i.get("versao_dados") or anterior["versao"], n))
+    apagados = _limpar_pacotes_velhos(conn, necessarios)
+    if ESTATISTICA["repeticoes"]:
+        log.warning("  o banco engasgou: %d gravação(ões) precisaram ser repetidas, e deu certo", ESTATISTICA["repeticoes"])
+    return {"versao": versao, "arquivos": arquivos, "gravados": gravados, "reaproveitados": reaproveitados, "apagados": apagados}
 
 
 def ler_arquivo_do_pacote(conn, versao: str, nome: str) -> bytes:
-    """Remonta um arquivo (gzip) do pacote. Usado nos testes; o servidor Node faz o mesmo em JavaScript."""
+    """Remonta um arquivo (gzip) do pacote. Usado nos testes; o servidor Node faz o mesmo em JavaScript.
+    Se `versao` é a que está no ar, os pedaços podem morar em outra versão (`versao_dados`): segue o ponteiro."""
     with conn.cursor() as cur:
-        cur.execute(f"SELECT dados FROM {SCHEMA}.pacote WHERE versao = %s AND nome = %s ORDER BY parte", (versao, nome))
+        cur.execute(f"SELECT arquivos FROM {SCHEMA}.pacote_versao WHERE id = 1 AND versao = %s", (versao,))
+        r = cur.fetchone()
+        onde = (((r[0] or {}).get(nome) or {}).get("versao_dados") if r else None) or versao
+        cur.execute(f"SELECT dados FROM {SCHEMA}.pacote WHERE versao = %s AND nome = %s ORDER BY parte", (onde, nome))
         partes = [bytes(r[0]) for r in cur.fetchall()]
     conn.rollback()
     return b"".join(partes)

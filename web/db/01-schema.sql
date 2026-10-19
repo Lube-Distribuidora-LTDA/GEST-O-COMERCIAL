@@ -37,7 +37,7 @@ create table if not exists trade.pacote_versao (
   versao        text        not null,
   gerado_em     timestamptz not null,
   meta          jsonb       not null,
-  arquivos      jsonb       not null,       -- {"nome": {"partes": n, "bytes": n, "sha1": "..."}}
+  arquivos      jsonb       not null,       -- {"nome": {"partes": n, "bytes": n, "sha1": "...", "versao_dados": "versão onde os pedaços moram"}}
   atualizado_em timestamptz not null default now()
 );
 

@@ -118,7 +118,9 @@ async function lerPacote() {
       for (const nome of ARQUIVOS_DO_PACOTE) {
         const info = v.arquivos[nome];
         if (!info) { if (nome === "imagens.json") { arquivos[nome] = Buffer.from("{}"); continue; } throw new Error("falta " + nome + " no pacote"); }
-        const r = await conectar().query(`SELECT dados FROM ${SCHEMA}.pacote WHERE versao = $1 AND nome = $2 ORDER BY parte`, [v.versao, nome]);
+        // os pedaços moram na versão `versao_dados`: a própria versão no ar, ou uma anterior quando o arquivo não mudou
+        // (versões gravadas antes de 2026-10-19 não têm o campo: os pedaços estão na própria versão)
+        const r = await conectar().query(`SELECT dados FROM ${SCHEMA}.pacote WHERE versao = $1 AND nome = $2 ORDER BY parte`, [info.versao_dados || v.versao, nome]);
         if (r.rows.length !== info.partes) throw Object.assign(new Error(`${nome}: vieram ${r.rows.length} de ${info.partes} partes`), { versaoTrocada: true });
         const gz = Buffer.concat(r.rows.map(x => x.dados));
         if (gz.length !== info.bytes || crypto.createHash("sha1").update(gz).digest("hex") !== info.sha1) throw new Error(nome + ": sha1 não confere (pacote corrompido)");

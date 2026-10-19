@@ -243,7 +243,8 @@ def main() -> int:
                         return len(blobs), None, res
                     ok_pub, pub = passo(pg, "publicar", f"{gt.SCHEMA}.pacote", f_publicar)
                     if ok_pub:
-                        log.info("Versão no ar: %s", pub["versao"])
+                        log.info("Versão no ar: %s (%d arquivo(s) gravado(s), %d reaproveitado(s) da versão anterior)",
+                                 pub["versao"], len(pub["gravados"]), len(pub["reaproveitados"]))
             elif pacote is not None:
                 log.info("--sem-gravar: pacote montado e conferido (%s linhas de venda, %s produtos em estoque); nada foi gravado.",
                          _fmt(pacote.n_venda), _fmt(len(pacote.est_out)))
@@ -278,6 +279,8 @@ def main() -> int:
     except bi.CargaJaRodando as aviso:
         # Não é erro: é a tranca fazendo o trabalho dela.
         log.warning("%s", aviso)
+        if not args.sem_gravar:
+            _registrar_pulada(cfg_pg)
         return 0
     except Exception:
         log.exception("Não consegui nem abrir as conexões — nada foi carregado.")
@@ -289,6 +292,17 @@ def main() -> int:
         return 1
     log.info("Todos os passos foram concluídos.")
     return 0
+
+
+def _registrar_pulada(cfg_pg) -> None:
+    """A carga foi pulada porque outra já estava rodando. Isso não deixava rastro nenhum no banco (em 2026-10-16 a das
+    12:25 simplesmente não apareceu, e ninguém soube dizer por quê): agora vira uma linha AVISO no controle_carga,
+    com a máquina e a conta. Registrar o aviso nunca derruba nada."""
+    try:
+        with bi.conectar_supabase(cfg_pg) as pg:
+            gt.registrar(pg, "carga", None, "AVISO", 0, 0.0, f"carga pulada: já havia outra rodando ({_quem()})")
+    except Exception:  # noqa: BLE001
+        log.warning("Não consegui registrar no banco que a carga foi pulada.")
 
 
 def _resumo(resultados) -> None:
