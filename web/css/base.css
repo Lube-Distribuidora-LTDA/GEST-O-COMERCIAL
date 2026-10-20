@@ -361,8 +361,8 @@ table.tabela { border-collapse: separate; border-spacing: 0; width: 100%; font: 
 .dos-cab .sub span { display: inline-flex; align-items: center; gap: 6px; }
 .dos-cab .sub svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; color: var(--ouro); }
 .dos-acoes .btn svg { width: 16px; height: 16px; }
-.dos-foto { width: 92px; height: 92px; flex: none; background: #fff; border-radius: 16px; display: grid; place-items: center; padding: 6px; box-shadow: 0 10px 26px -12px rgba(0,0,0,.7), 0 0 0 1px var(--ouro-linha); }
-.dos-foto img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.dos-foto { width: 92px; height: 92px; flex: none; background: #fff; border-radius: 16px; display: grid; grid-template: 100% / 100%; place-items: center; padding: 6px; box-shadow: 0 10px 26px -12px rgba(0,0,0,.7), 0 0 0 1px var(--ouro-linha); }
+.dos-foto img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .dos-acoes { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .dos-corpo { overflow: auto; padding: 20px 28px 40px; flex: 1; }
 .dos-trilha { display: flex; gap: 8px; align-items: center; font: 600 12px var(--f-txt); color: var(--t3); margin-bottom: 14px; flex-wrap: wrap; }
@@ -462,9 +462,10 @@ body.apresentando .apr-dica { display: flex; gap: 14px; align-items: center; }
   .tb-wrap { max-height: none !important; overflow: visible !important; }
 }
 
-/* miniatura do produto nas listas */
-.foto-mini { flex: none; width: 38px; height: 38px; border-radius: 10px; background: #fff; display: grid; place-items: center; padding: 3px; box-shadow: 0 0 0 1px var(--ouro-linha); overflow: hidden; vertical-align: middle; }
-.foto-mini img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+/* miniatura do produto nas listas. A grade com uma célula de 100% dá altura à foto: sem ela, o max-height: 100% não
+   tinha referência, e a foto em pé (embalagem alta) passava da moldura — cortada na lista e vazando na ampliada. */
+.foto-mini { flex: none; width: 38px; height: 38px; border-radius: 10px; background: #fff; display: grid; grid-template: 100% / 100%; place-items: center; padding: 3px; box-shadow: 0 0 0 1px var(--ouro-linha); overflow: hidden; vertical-align: middle; }
+.foto-mini img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .foto-mini.sem { background: var(--s2); box-shadow: 0 0 0 1px var(--linha); color: var(--t3); }
 .foto-mini.sem svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: .55; }
 .cel-foto { display: flex; align-items: center; gap: 11px; min-width: 0; }
@@ -472,6 +473,6 @@ body.apresentando .apr-dica { display: flex; gap: 14px; align-items: center; }
 .tabela td .foto-mini { margin: -3px 0; }
 .arv-nome { min-width: 0; }
 td.f1 > .foto-mini { display: inline-grid; margin: -4px 10px -4px 0; }
-.foto-zoom { position: fixed; z-index: 150; width: 232px; height: 232px; padding: 12px; background: #fff; border-radius: 20px; display: grid; place-items: center; pointer-events: none; box-shadow: 0 28px 64px -16px rgba(0,0,0,.8), 0 0 0 1px var(--ouro-linha); animation: foto-zoom-in .14s ease-out; }
-.foto-zoom img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.foto-zoom { position: fixed; z-index: 150; width: 232px; height: 232px; padding: 12px; background: #fff; border-radius: 20px; display: grid; grid-template: 100% / 100%; place-items: center; pointer-events: none; overflow: hidden; box-shadow: 0 28px 64px -16px rgba(0,0,0,.8), 0 0 0 1px var(--ouro-linha); animation: foto-zoom-in .14s ease-out; }
+.foto-zoom img { width: 100%; height: 100%; object-fit: contain; display: block; }
 @keyframes foto-zoom-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
