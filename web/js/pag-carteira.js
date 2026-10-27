@@ -15,7 +15,9 @@ L.registrarPagina({
     if (!cmp || (!cmp.aa && !cmp.pa)) { raiz.appendChild(L.h("div", { class: "vazio", html: "<b>Sem base de comparação</b>Escolha um período com ano anterior ou período anterior disponível (o histórico começa em jan/2023)." })); return; }
     var qual = L.estado.carteiraBase === "pa" && cmp.pa ? "pa" : (cmp.aa ? "aa" : "pa");
     var base = cmp[qual], rotBase = base.rot;
-    var ped = [{ id: "c", tipo: "carteira", base: { ano: null, mes: null, de: null, ate: null, mis: base.mis }, corteBase: base.corte, limite: 600 }];
+    // a carteira é uma comparação: o período atual entra só com os dias fechados (a venda de hoje fica fora, decisão do Júlio)
+    var mh = L.mesesHojeNa(cmp);
+    var ped = [{ id: "c", tipo: "carteira", base: { ano: null, mes: null, de: null, ate: null, mis: base.mis }, corteBase: base.corte, corte: mh, limite: 600 }];
     return L.consultar(ped).then(function (j) {
       var R = j.resultados.c, S = R.resumo, fBR0 = function (v) { return L.fBRL(v, 0); };
       var seg = L.h("div", { class: "seg" });
@@ -24,7 +26,7 @@ L.registrarPagina({
         seg.appendChild(L.h("button", { type: "button", class: o[0] === qual ? "on" : "", text: o[1], onclick: function () { L.estado.carteiraBase = o[0]; L.emitir("filtros"); } }));
       });
       raiz.appendChild(L.h("div", { style: { display: "flex", gap: "12px", alignItems: "center", margin: "0 0 14px", flexWrap: "wrap" } }, L.h("span", { class: "fx-rot", text: "Comparar " + cmp.rot + " com" }), seg,
-        L.h("span", { style: { color: "var(--t3)", font: "500 13px var(--f-txt)" }, text: rotBase + (cmp.parcial ? " · mesmo número de dias" : "") })));
+        L.h("span", { style: { color: "var(--t3)", font: "500 13px var(--f-txt)" }, text: rotBase + (cmp.parcial ? " · mesmo número de dias" : "") + (mh.length ? " · só dias fechados (a venda de hoje entra amanhã)" : "") })));
       var ret = L.div(S.retidos.n, R.base.n);
       raiz.appendChild(L.kpis(
         L.kpi({ icone: "pessoas", rot: "Clientes ativos", valor: R.atual.n, fmt: L.fInt, classe: "heroi", cmp: { cmp: { aa: { rot: rotBase, mis: base.mis } }, aa: R.base.n, fmt: L.fInt }, leg: L.h("span", { text: "base: " + L.fInt(R.base.n) + " clientes" }) }),

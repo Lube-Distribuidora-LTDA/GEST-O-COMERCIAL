@@ -166,7 +166,8 @@ L.consultar = function (pedidos, opts) {
   opts = opts || {};
   // v = versão do pacote com que ESTA tela foi montada: se o servidor já trocou de versão, ele recusa (409) em vez de
   // aplicar índices de uma carga a dados de outra
-  var corpo = JSON.stringify({ v: L.META && L.META.gerado_em, filtros: opts.filtros || L.filtrosApi(), pedidos: pedidos });
+  // vh = versão da venda de hoje que a tela conhece: a cópia do servidor que estiver atrás se atualiza antes de responder
+  var corpo = JSON.stringify({ v: L.META && L.META.gerado_em, vh: L.HOJE ? L.HOJE.versao : null, filtros: opts.filtros || L.filtrosApi(), pedidos: pedidos });
   if (cacheConsulta.has(corpo)) return Promise.resolve(cacheConsulta.get(corpo));
   var canal = opts.canal || "pagina";
   if (controles[canal]) controles[canal].abort();
@@ -183,6 +184,8 @@ L.consultar = function (pedidos, opts) {
       for (var k in j.resultados) if (j.resultados[k] && j.resultados[k].erro) throw new Error(j.resultados[k].erro);
       cacheConsulta.set(corpo, j);
       if (cacheConsulta.size > 80) cacheConsulta.delete(cacheConsulta.keys().next().value);
+      // o servidor já tem venda de hoje mais nova que a da tela: a tela sincroniza e redesenha (sem recarregar)
+      if (j.hoje && (!L.HOJE || j.hoje > L.HOJE.versao) && L.hojeMudou) setTimeout(L.hojeMudou, 0);
       return j;
     });
 };

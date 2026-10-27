@@ -97,6 +97,48 @@ function versaoNoAr() {
   return comConexao(async c => (await c.query(`SELECT versao, meta, arquivos FROM ${SCHEMA}.pacote_versao WHERE id = 1`)).rows[0] || null);
 }
 
+/* ---- a venda de hoje (AGENTE LUBE, ver hoje.js) ---- */
+/* a versão que o agente marca a cada gravação no schema trade (consulta levíssima) */
+function versaoHoje() {
+  return comConexao(async c => (await c.query(`SELECT versao, mudou_em FROM agente.sistema WHERE sistema = 'trade'`)).rows[0] || null);
+}
+/* as linhas dos dias depois do corte do arquivo (venda_dia) e a venda por hora e RCA de hoje e do mesmo dia da semana
+   passada (venda_hora). Valores em float8: o hoje.js passa para centavos como o ETL (round(x * 100)). */
+function lerHoje(corteAte, hoje, semana) {
+  return comConexao(async c => {
+    const dia = await c.query(
+      `SELECT to_char(dtmov, 'YYYY-MM-DD') AS dia, codusur, codcli, codprod, venda::float8 AS v, devolucao::float8 AS d,
+              qt_venda::float8 AS qv, qt_dev::float8 AS qd, peso::float8 AS w
+         FROM ${SCHEMA}.venda_dia WHERE dtmov > $1::date ORDER BY dtmov, codcli, codprod, codusur`, [corteAte]);
+    const hora = await c.query(
+      `SELECT to_char(dtmov, 'YYYY-MM-DD') AS dia, hora, codusur, (venda - devolucao)::float8 AS v
+         FROM ${SCHEMA}.venda_hora WHERE dtmov IN ($1::date, $2::date)`, [hoje, semana]);
+    return { dia: dia.rows, hora: hora.rows };
+  });
+}
+/* cadastro dos códigos que o arquivo ainda não tem (cliente, produto ou RCA novo de hoje), dos core.dim_* que o agente mantém */
+function cadastros(cli, prod, rca) {
+  return comConexao(async c => ({
+    cli: cli.length ? (await c.query(`SELECT codcli, cliente, cidade, uf FROM core.dim_cliente WHERE codcli = ANY($1::int[])`, [cli])).rows : [],
+    prod: prod.length ? (await c.query(`SELECT codprod, descricao FROM core.dim_produto WHERE codprod = ANY($1::int[])`, [prod])).rows : [],
+    rca: rca.length ? (await c.query(`SELECT codusur, nome, codsupervisor FROM core.dim_rca WHERE codusur = ANY($1::int[])`, [rca])).rows : [],
+  }));
+}
+
+/* o botão Atualizar (a ponte, como no Inventário e no Comercial): pede ao agente uma leitura do WinThor agora. Com o
+   agente fora do ar (batimento com mais de 3 minutos) nada é pedido e a tela cai no jeito antigo. */
+function pedirAtualizacao() {
+  return comConexao(async c => (await c.query(
+    `WITH a AS (SELECT max(visto_em) AS visto, bool_or(ligado) AS ligado FROM agente.batimento WHERE visto_em > now() - interval '3 minutes')
+     SELECT a.visto, coalesce(a.ligado, false) AS ligado,
+            CASE WHEN a.visto IS NOT NULL AND a.ligado THEN agente.pedir_atualizacao('trade', 'painel gestao-comercial-trade') END AS pedido
+       FROM a`)).rows[0] || {});
+}
+function lerPedido(id) {
+  return comConexao(async c => (await c.query(
+    `SELECT id, status, mensagem, segundos::float8 AS segundos, detalhe FROM agente.pedido WHERE id = $1 AND sistema = 'trade'`, [id])).rows[0] || null);
+}
+
 /* miniatura WebP da foto do produto (guardada pelo ETL em trade.produto_miniatura); null se não há */
 function miniatura(cod) {
   return comConexao(async c => {
@@ -152,4 +194,5 @@ async function fechar() {
   await p.end().catch(() => {});
 }
 
-module.exports = { carregarDoBanco, carregarDeArquivos, versaoNoAr, miniatura, fechar, acharEnv, variavel };
+module.exports = { carregarDoBanco, carregarDeArquivos, versaoNoAr, miniatura, fechar, acharEnv, variavel, versaoHoje, lerHoje, cadastros,
+                   pedirAtualizacao, lerPedido };

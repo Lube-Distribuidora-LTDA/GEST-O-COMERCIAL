@@ -31,7 +31,7 @@ const MIME = {
   ".ico": "image/x-icon", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".txt": "text/plain; charset=utf-8",
 };
 // o que nunca é entregue ao navegador
-const BLOQUEADOS = [/^\/dados\/venda\.bin\.gz$/, /^\/dados\/imagens\.json$/, /^\/motor\.js$/, /^\/servidor_local\.js$/, /^\/fonte_dados\.js$/, /^\/pacote\.js$/,
+const BLOQUEADOS = [/^\/dados\/venda\.bin\.gz$/, /^\/dados\/imagens\.json$/, /^\/motor\.js$/, /^\/servidor_local\.js$/, /^\/fonte_dados\.js$/, /^\/pacote\.js$/, /^\/hoje\.js$/,
   /^\/api\//, /^\/package/, /^\/node_modules\//, /^\/db\//, /^\/cache_img\//, /^\/middleware\.ts$/, /^\/sentinela-guarda\.ts$/, /^\/vercel\.json$/, /^\/\./];
 
 /* ------------------------------ respostas ------------------------------ */
@@ -161,10 +161,13 @@ http.createServer(async (req, res) => {
       const e = P.estadoAtual();                                 // a versão pode trocar no meio; esta consulta termina na que começou
       if (!e) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end('{"erro":"sem dados"}'); }
       const txt = await lerCorpo(req);
-      const r = P.responderConsulta(e, JSON.parse(txt), txt);
+      const corpo = JSON.parse(txt);
+      if (P.precisaHoje(e, corpo)) await P.verificarHoje();         // a tela já viu venda de hoje mais nova
+      const r = P.responderConsulta(e, corpo, txt);
       if (r.status !== 200) { res.writeHead(r.status, { "Content-Type": "application/json", "Cache-Control": "no-store" }); return res.end(r.corpo); }
       return gz(req, res, "application/json; charset=utf-8", r.corpo);
     }
+    if (url.pathname === "/api/atualizar") return require("./api/atualizar.js")(req, res);   // o botão Atualizar: a ponte até o agente
     const mi = /^\/img\/(\d{1,9})$/.exec(url.pathname);
     if (mi) {
       const w = Math.min(1200, Math.max(64, Math.round((+url.searchParams.get("w") || 480) / 16) * 16));
@@ -172,6 +175,7 @@ http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/versao") {
       if (url.searchParams.get("verificar")) await P.verificar();          // botão "atualizar": pergunta ao banco agora
+      if (url.searchParams.get("verificar") || url.searchParams.get("hoje")) await P.verificarHoje();   // a venda de hoje
       const e = P.estadoAtual();
       if (!e) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end('{"erro":"sem dados"}'); }
       return gz(req, res, "application/json; charset=utf-8", JSON.stringify(P.infoVersao(e, { fotos: pastaFotos() ? "ok" : "pasta FOTOS_ION fora do ar" })));
@@ -185,5 +189,8 @@ http.createServer(async (req, res) => {
   }
 }).listen(PORTA, HOST, () => {
   console.log(`Gestão Comercial em http://${HOST === "0.0.0.0" ? "<esta-máquina>" : "localhost"}:${PORTA}`);
-  P.carregar().catch(e => console.error("falha ao montar o pacote:", e && e.stack || e)).then(() => setInterval(P.verificar, P.INTERVALO_MS));
+  P.carregar().catch(e => console.error("falha ao montar o pacote:", e && e.stack || e)).then(() => {
+    setInterval(P.verificar, P.INTERVALO_MS);
+    setInterval(P.verificarHoje, P.INTERVALO_HOJE_MS);                 // a venda de hoje, do AGENTE LUBE
+  });
 });

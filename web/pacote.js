@@ -12,6 +12,10 @@
  * Por que o 409: os índices (cliente, produto, RCA...) mudam a cada carga. Se o ETL troca a versão com a página aberta,
  * a próxima consulta usaria índices de uma versão contra dados de outra, e mostraria o dado de outro cliente sem avisar.
  * A tela manda a versão em cada pedido (meta.gerado_em) e, ao receber 409, recarrega.
+ *
+ * A venda de hoje (hoje.js, desde 2026-10-27) é outra coisa: não troca o pacote nem recarrega a página. O servidor
+ * pergunta a versão do AGENTE LUBE de 15 em 15 s (verificarHoje), põe as linhas de hoje por cima no motor e
+ * responde cada consulta com `hoje` (a versão dessas linhas); a tela manda `vh`, a que ela conhece.
  * ========================================================================== */
 "use strict";
 
@@ -19,10 +23,12 @@ const path = require("path");
 const zlib = require("zlib");
 const { Motor } = require("./motor.js");
 const fonte = require("./fonte_dados.js");
+const hoje = require("./hoje.js");
 
 const DADOS = path.join(__dirname, "dados");
 const NA_VERCEL = !!process.env.VERCEL;
 const INTERVALO_MS = +process.env.TRADE_POLL_MS || 60000;
+const INTERVALO_HOJE_MS = +process.env.TRADE_HOJE_MS || 15000;
 // o que o navegador pode baixar; venda.bin.gz (as linhas) e imagens.json nunca saem do servidor
 const PUBLICOS = new Set(["dims.json", "estoque.json", "entradas.json", "cc.json", "historico.json", "meta.json"]);
 
@@ -31,6 +37,8 @@ let avisoBanco = null;      // último motivo de o banco não ter respondido
 let carregamento = null;    // promessa da carga em andamento
 let verificando = null;
 let ultimaChecagem = 0;
+let verificandoHoje = null;
+let ultimaHoje = 0;
 
 /* aquecimento: a primeira consulta depois de montar o motor paga a compilação do JavaScript (segundos).
    Rodar um conjunto típico de pedidos antes de o primeiro usuário chegar tira esse custo da frente dele. */
@@ -83,7 +91,7 @@ function carregar() {
           catch (e2) { console.error("sem dados nenhum:", e2.message, "— rode etl/sync_trade.py"); }
         }
       } finally { await soltarConexao(); }
-      if (pac) instalar(pac);
+      if (pac) { instalar(pac); await verificarHoje(true); }
     })().finally(() => { carregamento = null; });
   }
   return carregamento;
@@ -106,6 +114,7 @@ async function verificar() {
       if (v && (!estado || estado.origem !== "banco" || v.versao !== estado.versao)) {
         console.log(`versão nova no banco: ${v.versao}`);
         instalar(await fonte.carregarDoBanco());
+        await verificarHoje(true);                    // o corte do arquivo novo é outro: a venda de hoje é montada de novo
       }
     } catch (e) {
       if (e.message !== avisoBanco) console.error("[banco] não consegui checar a versão:", e.message);
@@ -115,12 +124,31 @@ async function verificar() {
   return verificando;
 }
 
+/* a venda de hoje: pergunta a versão do agente e, se mudou, põe as linhas por cima (uma por vez). Sem o agente ou
+   com o banco fora, o painel segue com o arquivo (dias fechados), como era antes. */
+function verificarHoje(forcar) {
+  if (!estado || estado.origem !== "banco") return Promise.resolve();
+  if (verificandoHoje) return verificandoHoje;
+  // várias telas perguntando juntas (na Vercel, cada /api/versao?hoje=1): uma pergunta ao banco a cada 3 s basta
+  if (forcar !== true && Date.now() - ultimaHoje < 3000) return Promise.resolve();
+  const e = estado;
+  verificandoHoje = (async () => {
+    try { await hoje.atualizar(e, forcar === true); }
+    catch (err) { console.error("[hoje] não consegui montar a venda de hoje:", err.message); }
+    finally { ultimaHoje = Date.now(); await soltarConexao(); }
+  })().finally(() => { verificandoHoje = null; });
+  return verificandoHoje;
+}
+/* a tela já viu uma versão de hoje mais nova que a desta cópia do servidor (na Vercel há várias): atualiza antes */
+function precisaHoje(e, corpo) { return !!(corpo && corpo.vh && (!e.hoje || corpo.vh > e.hoje.versao)); }
+
 /* Vercel: função não tem relógio entre as requisições. Checa no máximo 1x por INTERVALO, depois de responder (waitUntil). */
 function agendarChecagem(waitUntil) {
-  if (!estado || verificando || Date.now() - ultimaChecagem < INTERVALO_MS) return;
-  ultimaChecagem = Date.now();
-  const p = verificar();
-  if (typeof waitUntil === "function") waitUntil(p);
+  if (!estado) return;
+  const ps = [];
+  if (!verificando && Date.now() - ultimaChecagem >= INTERVALO_MS) { ultimaChecagem = Date.now(); ps.push(verificar()); }
+  if (!verificandoHoje && Date.now() - ultimaHoje >= INTERVALO_HOJE_MS) { ultimaHoje = Date.now(); ps.push(verificarHoje()); }
+  if (ps.length && typeof waitUntil === "function") waitUntil(Promise.all(ps));
 }
 
 function responderConsulta(e, corpo, txt) {
@@ -128,7 +156,9 @@ function responderConsulta(e, corpo, txt) {
     return { status: 409, corpo: JSON.stringify({ erro: "versao", atual: e.meta.gerado_em }) };
   let r = e.cacheResp.get(txt);
   if (!r) {
-    r = JSON.stringify(e.motor.consultar(corpo));
+    const out = e.motor.consultar(corpo);
+    out.hoje = e.hoje ? e.hoje.versao : null;          // a versão da venda de hoje com que esta resposta foi feita
+    r = JSON.stringify(out);
     e.cacheResp.set(txt, r);
     if (e.cacheResp.size > 400) e.cacheResp.delete(e.cacheResp.keys().next().value);
   }
@@ -144,9 +174,15 @@ function arquivoPublico(e, nome) {
 }
 
 function infoVersao(e, extra) {
-  return Object.assign({}, e.meta, { fonte: Object.assign({ origem: e.origem, versao: e.versao, carregado_em: e.carregadoEm, aviso_banco: avisoBanco }, extra || {}) });
+  return Object.assign({}, e.meta, {
+    fonte: Object.assign({ origem: e.origem, versao: e.versao, carregado_em: e.carregadoEm, aviso_banco: avisoBanco }, extra || {}),
+    // a venda de hoje: a versão, até quando, e os clientes/produtos/RCAs/meses que o arquivo ainda não tem (a tela
+    // acrescenta às listas dela, nos mesmos índices do motor)
+    hoje: e.hoje || null,
+  });
 }
 
 function estadoAtual() { return estado; }
 
-module.exports = { garantir, carregar, verificar, agendarChecagem, responderConsulta, arquivoPublico, infoVersao, estadoAtual, PUBLICOS, NA_VERCEL, INTERVALO_MS, DADOS };
+module.exports = { garantir, carregar, verificar, verificarHoje, precisaHoje, agendarChecagem, responderConsulta, arquivoPublico, infoVersao,
+                   estadoAtual, PUBLICOS, NA_VERCEL, INTERVALO_MS, INTERVALO_HOJE_MS, DADOS };

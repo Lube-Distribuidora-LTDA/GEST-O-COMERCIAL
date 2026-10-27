@@ -11,6 +11,7 @@ module.exports = async function (req, res) {
     if (typeof req.body === "string") { txt = req.body; corpo = JSON.parse(txt); }
     else if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) { corpo = req.body; txt = JSON.stringify(corpo); }
     else { txt = await lerCorpo(req); corpo = JSON.parse(txt); }
+    if (P.precisaHoje(e, corpo)) await P.verificarHoje();          // a tela já viu venda de hoje mais nova que esta cópia
     const r = P.responderConsulta(e, corpo, txt);
     P.agendarChecagem(waitUntil());                                // depois de responder: saiu versão nova?
     res.statusCode = r.status;

@@ -245,7 +245,8 @@ L.descricaoFiltros = function (extra) {
   var out = [], f = L.estado.filtros;
   var D = L.D, cmp = L.misDe(f);
   out.push(["Período", cmp.length ? L.rotMis(cmp) : "—"]);
-  out.push(["Dados até", L.fData(D.corte.ate)]);
+  out.push(["Dados até", L.fData(D.corte.ate) + (L.HOJE && L.HOJE.mudou_em
+    ? " + venda de hoje até " + new Date(L.HOJE.mudou_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) + " (comparações só com dias fechados)" : "")]);
   Object.keys(L.DIM).forEach(function (k) {
     if (k === "ano" || k === "mes") return;
     var a = f[k]; if (!a || !a.length) return;

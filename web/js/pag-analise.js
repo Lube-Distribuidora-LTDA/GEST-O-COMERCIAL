@@ -26,7 +26,8 @@ L.registrarPagina({
     return L.consultar(L.pedidosCmp("res", "resumo", {}, cmp)).then(function (j) {
       var R = j.resultados, at = L.derivar(R.res), aa = R.res_aa ? L.derivar(R.res_aa) : null, pa = R.res_pa ? L.derivar(R.res_pa) : null;
       var fBR0 = function (v) { return L.fBRL(v, 0); };
-      var kc = function (campo, fmt) { return cmp ? { cmp: cmp, aa: aa ? aa[campo] : null, pa: pa ? pa[campo] : null, fmt: fmt } : null; };
+      var atF = L.cmpFechado(R, "res");          // com a venda de hoje nos totais: a % compara só os dias fechados
+      var kc = function (campo, fmt) { return cmp ? L.comAtualFechado({ cmp: cmp, aa: aa ? aa[campo] : null, pa: pa ? pa[campo] : null, fmt: fmt }, atF, campo) : null; };
       raiz.appendChild(L.kpis(
         L.kpi({ icone: "dinheiro", rot: "Venda líquida", valor: at.venda, fmt: fBR0, classe: "heroi", cmp: kc("venda", fBR0), aoClicar: function () { L.abrirDossie({ dim: null }); }, leg: L.h("span", { text: cmp ? cmp.rot + (cmp.parcial ? " · até " + cmp.ateDia : "") : "" }) }),
         L.kpi({ icone: "pessoas", rot: "Positivação", valor: at.pos, fmt: L.fInt, cmp: kc("pos", L.fInt) }),

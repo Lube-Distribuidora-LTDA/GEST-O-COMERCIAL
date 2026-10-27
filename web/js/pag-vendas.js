@@ -55,16 +55,19 @@ L.registrarPagina({
        { id: "cat", tipo: "agrupar", por: "categoria", dist: ["pos"], limite: 12 },
        { id: "ramo", tipo: "agrupar", por: "ramo", dist: ["pos"], limite: 12 },
        { id: "origem", tipo: "agrupar", por: "origem" }],
-      cmp && cmp.aa ? [{ id: "gp", tipo: "agrupar", por: (L.estado.ganhoDim || "fornecedor") },
-                       { id: "gp_aa", tipo: "agrupar", por: (L.estado.ganhoDim || "fornecedor"), filtros: { ano: null, mes: null, de: null, ate: null, mis: cmp.aa.mis }, corte: cmp.aa.corte }] : []);
+      cmp && cmp.aa ? [{ id: "gp", tipo: "agrupar", por: (L.estado.ganhoDim || "fornecedor"), corte: L.mesesHojeNa(cmp) },
+                       { id: "gp_aa", tipo: "agrupar", por: (L.estado.ganhoDim || "fornecedor"), filtros: { ano: null, mes: null, de: null, ate: null, mis: cmp.aa.mis }, corte: cmp.aa.corte }] : [],
+      L.HOJE ? [{ id: "hoje", tipo: "hoje", hora: new Date().getHours() }] : []);
     return L.consultar(ped).then(function (j) {
       var R = j.resultados, C = L.cores();
       var at = L.derivar(R.res), aa = R.res_aa ? L.derivar(R.res_aa) : null, pa = R.res_pa ? L.derivar(R.res_pa) : null;
+      var atF = L.cmpFechado(R, "res");          // com a venda de hoje nos totais: a % compara só os dias fechados
       var D = L.D, total = at.venda;
 
       /* --- KPIs --- */
-      var kpiCmp = function (campo, fmt, extra) { return cmp ? Object.assign({ cmp: cmp, aa: aa ? aa[campo] : null, pa: pa ? pa[campo] : null, fmt: fmt }, extra || {}) : null; };
+      var kpiCmp = function (campo, fmt, extra) { return cmp ? L.comAtualFechado(Object.assign({ cmp: cmp, aa: aa ? aa[campo] : null, pa: pa ? pa[campo] : null, fmt: fmt }, extra || {}), atF, campo) : null; };
       var fBR0 = function (v) { return L.fBRL(v, 0); };
+      if (R.hoje && R.hoje.ativo) raiz.appendChild(L.cartaoHoje(R.hoje));
       raiz.appendChild(L.kpis(
         L.kpi({ icone: "dinheiro", rot: "Venda líquida", valor: at.venda, fmt: fBR0, classe: "heroi", cmp: kpiCmp("venda", fBR0), aoClicar: function () { L.abrirDossie({ dim: null }); },
                 ajuda: "Venda bruta menos devoluções. Clique para abrir o relatório da seleção.",

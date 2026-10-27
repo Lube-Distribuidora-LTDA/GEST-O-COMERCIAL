@@ -17,6 +17,12 @@
  *   positivação  = clientes distintos com venda bruta > 0 no recorte
  *   mix          = pares cliente x produto distintos com venda > 0 ÷ positivação
  *   ticket       = venda líquida ÷ positivação
+ *
+ * A venda de hoje (2026-10-27, AGENTE LUBE): o arquivo só tem dias fechados (até ontem). Os vetores são
+ * montados com folga (CAPACIDADE_HOJE) e `aplicarHoje` escreve, depois das linhas do arquivo, as linhas dos
+ * dias que vieram depois do corte, no mesmo grão (mês x RCA x cliente x produto), com ZERO nas colunas "até o
+ * dia de corte" (vc, dc, qvc, qdc). Assim o total sobe com hoje e a comparação com o mesmo número de dias
+ * (efetivos) continua só com dias fechados — decisão do Júlio. Quem lê o banco e chama é o hoje.js.
  * ========================================================================== */
 "use strict";
 
@@ -29,23 +35,33 @@ function norm(s) {
 }
 
 const TIPOS = { u1: Uint8Array, u2: Uint16Array, u4: Uint32Array, i4: Int32Array, f4: Float32Array };
+// folga para as linhas de hoje: hoje tem ~4 a 8 mil; ontem + hoje (da meia-noite até a carga da manhã), ~15 mil
+const CAPACIDADE_HOJE = 80000;
 
 class Motor {
   constructor(dims, vendaGz) {
     const t0 = Date.now();
     this.dims = dims;
     const buf = zlib.gunzipSync(vendaGz);
-    // cópia para um ArrayBuffer alinhado (as visões tipadas exigem offset múltiplo do elemento)
-    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length);
-    const tamCab = new DataView(ab).getUint32(0, true);
-    const cab = JSON.parse(Buffer.from(ab, 4, tamCab).toString("utf8"));
+    const tamCab = buf.readUInt32LE(0);
+    const cab = JSON.parse(buf.toString("utf8", 4, 4 + tamCab));
     let base = 4 + tamCab;
     base += (8 - (base % 8)) % 8;
+    this.nBase = cab.n;
     this.n = cab.n;
+    this.cap = cab.n + CAPACIDADE_HOJE;
     this.col = {};
-    for (const c of cab.cols) this.col[c.nome] = new TIPOS[c.tipo](ab, base + c.off, cab.n);
+    // cada coluna é copiada, byte a byte, para um vetor com folga no fim (as linhas de hoje entram ali, ver
+    // aplicarHoje). A cópia de bytes dispensa o ArrayBuffer alinhado que as visões tipadas exigiam: na montagem a
+    // memória fica no mesmo pico de antes (o arquivo aberto + as colunas).
+    for (const c of cab.cols) {
+      const v = new TIPOS[c.tipo](this.cap), tam = cab.n * TIPOS[c.tipo].BYTES_PER_ELEMENT, ini = base + c.off;
+      new Uint8Array(v.buffer, 0, tam).set(buf.subarray(ini, ini + tam));
+      this.col[c.nome] = v;
+    }
     this.preparar();
     this.cacheFiltro = new Map();
+    this.hoje = null;            // { dia, semana, hora, ... } e o cartão por hora: ver aplicarHoje / cartaoHoje
     this.msCarga = Date.now() - t0;
   }
 
@@ -57,6 +73,12 @@ class Motor {
 
   /* ---------------- tabelas derivadas ---------------- */
   preparar() {
+    this.prepararEntidades();
+    this.prepararLinhas();
+  }
+
+  /* o que depende só das dimensões (refeito quando a venda de hoje traz cliente, produto, RCA ou mês novo) */
+  prepararEntidades() {
     const D = this.dims;
     const nP = D.produtos.length, nC = D.clientes.length, nR = D.rcas.length, nM = D.meses.length;
     this.nP = nP; this.nC = nC; this.nR = nR; this.nM = nM;
@@ -93,26 +115,6 @@ class Motor {
     this.rEq = new Int32Array(nR); this.rUf = new Int32Array(nR);
     D.rcas.forEach((r, i) => { this.rEq[i] = r[2]; this.rUf[i] = D.equipes[r[2]][2]; });
 
-    // pares cliente x produto
-    const { c, p } = this.col, n = this.n;
-    const chaves = new Uint32Array(n);
-    for (let i = 0; i < n; i++) chaves[i] = c[i] * 65536 + p[i];
-    const ord = chaves.slice().sort();
-    let u = 0;
-    for (let i = 0; i < n; i++) if (i === 0 || ord[i] !== ord[i - 1]) ord[u++] = ord[i];
-    const unicas = ord.subarray(0, u);
-    this.nPares = u;
-    this.pair = new Uint32Array(n);
-    for (let i = 0; i < n; i++) {
-      let lo = 0, hi = u - 1; const k = chaves[i];
-      while (lo < hi) { const mid = (lo + hi) >>> 1; if (unicas[mid] < k) lo = mid + 1; else hi = mid; }
-      this.pair[i] = lo;
-    }
-
-    // primeiro mês com venda de cada cliente (0 = já comprava quando o histórico começa: não dá para saber)
-    this.cFirst = new Int16Array(nC).fill(32767);
-    for (let i = 0; i < n; i++) { if (this.col.v[i] > 0) { const ci = c[i], mi = this.col.m[i]; if (mi < this.cFirst[ci]) this.cFirst[ci] = mi; } }
-
     // dimensões de agrupamento: fonte (coluna da linha) + tabela fonte->chave (−1 vai para o último balde)
     const idt = (len) => { const a = new Int32Array(len); for (let i = 0; i < len; i++) a[i] = i; return a; };
     const nz = (arr, fn) => arr;
@@ -142,6 +144,102 @@ class Motor {
       rca: D.rcas.map(r => norm(r[0] + " " + r[1])),
       fornecedor: D.fornecedores.map(f => norm(f[0] + " " + f[1])),
     };
+  }
+
+  /* o que depende das linhas do arquivo: pares cliente x produto e o primeiro mês de compra de cada cliente */
+  prepararLinhas() {
+    const { c, p } = this.col, n = this.nBase;
+    const chaves = new Uint32Array(n);
+    for (let i = 0; i < n; i++) chaves[i] = c[i] * 65536 + p[i];
+    const ord = chaves.slice().sort();
+    let u = 0;
+    for (let i = 0; i < n; i++) if (i === 0 || ord[i] !== ord[i - 1]) ord[u++] = ord[i];
+    const unicas = ord.slice(0, u);
+    this.unicas = unicas;                 // guardadas: a venda de hoje procura o par aqui (ver aplicarHoje)
+    this.nParesBase = u;
+    this.nPares = u;
+    this.pair = new Uint32Array(this.cap);
+    for (let i = 0; i < n; i++) {
+      let lo = 0, hi = u - 1; const k = chaves[i];
+      while (lo < hi) { const mid = (lo + hi) >>> 1; if (unicas[mid] < k) lo = mid + 1; else hi = mid; }
+      this.pair[i] = lo;
+    }
+
+    // primeiro mês com venda de cada cliente (0 = já comprava quando o histórico começa: não dá para saber)
+    this.cFirstBase = new Int16Array(this.nC).fill(32767);
+    for (let i = 0; i < n; i++) { if (this.col.v[i] > 0) { const ci = c[i], mi = this.col.m[i]; if (mi < this.cFirstBase[ci]) this.cFirstBase[ci] = mi; } }
+    this.cFirst = this.cFirstBase.slice();
+  }
+
+  /* ---------------- a venda de hoje ----------------
+     h = { m, c, p, r, v, d, qv, qd, w, diaHoje }: as linhas dos dias depois do corte do arquivo, já em índices (as
+     dimensões novas já foram acrescentadas a this.dims por quem chama; `entidades` = true quando houve). Substitui o
+     que havia de hoje (não soma): cada versão da venda de hoje traz o dia inteiro até agora.
+     hora = { dia, hora, r, v }: venda líquida por hora e RCA (centavos), para o cartão; info = { hoje, semana, horaAgora } */
+  aplicarHoje(h, entidades, hora, info) {
+    if (entidades || this.dims.clientes.length !== this.nC || this.dims.meses.length !== this.nM ||
+        this.dims.produtos.length !== this.nP || this.dims.rcas.length !== this.nR) this.prepararEntidades();
+    const k = h ? h.m.length : 0, b = this.nBase;
+    if (b + k > this.cap) throw new Error(`venda de hoje com ${k} linhas: passa da folga de ${CAPACIDADE_HOJE}`);
+    const col = this.col;
+    const cf = new Int16Array(this.nC).fill(32767);
+    cf.set(this.cFirstBase);
+    const extra = new Map(), u = this.nParesBase, unicas = this.unicas;
+    const diaHoje = new Uint8Array(k);
+    for (let j = 0; j < k; j++) {
+      const i = b + j, c = h.c[j], p = h.p[j], v = h.v[j];
+      col.m[i] = h.m[j]; col.c[i] = c; col.p[i] = p; col.r[i] = h.r[j];
+      col.v[i] = v; col.d[i] = h.d[j]; col.qv[i] = h.qv[j]; col.qd[i] = h.qd[j]; col.w[i] = h.w[j];
+      col.vc[i] = 0; col.dc[i] = 0; col.qvc[i] = 0; col.qdc[i] = 0;        // fora da comparação (só dias fechados)
+      const chave = c * 65536 + p;
+      let lo = 0, hi = u - 1;
+      while (lo < hi) { const mid = (lo + hi) >>> 1; if (unicas[mid] < chave) lo = mid + 1; else hi = mid; }
+      if (u && unicas[lo] === chave) this.pair[i] = lo;
+      else { let q = extra.get(chave); if (q == null) { q = u + extra.size; extra.set(chave, q); } this.pair[i] = q; }
+      if (v > 0 && h.m[j] < cf[c]) cf[c] = h.m[j];
+      diaHoje[j] = h.diaHoje ? h.diaHoje[j] : 1;
+    }
+    this.cFirst = cf;
+    this.n = b + k;
+    this.nPares = u + extra.size;
+    this.hoje = Object.assign({ linhas: k, diaHoje, hora: hora || null }, info || {});
+    this.cacheFiltro.clear();
+    if (this._ef) this._ef.clear();
+  }
+
+  /* cartão "hoje até agora": a venda líquida de hoje com TODOS os filtros (linhas de hoje), e, por hora e RCA, hoje
+     contra o mesmo dia da semana passada até a mesma hora — esta parte só com os filtros de RCA, equipe e estado
+     (a tabela por hora não tem cliente nem produto: com esses filtros a comparação não sai e a tela diz por quê) */
+  cartaoHoje(f, ped) {
+    const H = this.hoje;
+    if (!H) return { ativo: false };
+    // a hora vem no pedido (a tela manda a dela, de Brasília): assim a resposta guardada em cache vale só naquela hora
+    const horaAgora = ped && ped.hora != null ? +ped.hora : H.horaAgora;
+    const g = Object.assign({}, f || {});
+    for (const k of ["ano", "mes", "de", "ate", "mis"]) delete g[k];       // o cartão é de hoje, qualquer que seja o período
+    const R = this.resolver(g), idx = R.idx, col = this.col, b = this.nBase;
+    let bruta = 0, dev = 0; const vistos = new Uint8Array(this.nC); let pos = 0;
+    let lo = 0, hi = idx.length;
+    while (lo < hi) { const mid = (lo + hi) >>> 1; if (idx[mid] < b) lo = mid + 1; else hi = mid; }
+    for (let t = lo; t < idx.length; t++) {
+      const i = idx[t];
+      if (!H.diaHoje[i - b]) continue;
+      bruta += col.v[i]; dev += col.d[i];
+      if (col.v[i] > 0 && !vistos[col.c[i]]) { vistos[col.c[i]] = 1; pos++; }
+    }
+    const out = { ativo: true, dia: H.hoje, hora: horaAgora, venda: (bruta - dev) / 100, bruta: bruta / 100, pos };
+    out.so_rca = !!R.outros;
+    if (H.hora && !R.outros) {
+      const h = H.hora, rOK = R.rOK;
+      let hoje = 0, semana = 0, semanaDia = 0;
+      for (let j = 0; j < h.dia.length; j++) {
+        if (!rOK[h.r[j]]) continue;
+        if (h.dia[j] === 0) hoje += h.v[j];
+        else { semanaDia += h.v[j]; if (h.hora[j] <= horaAgora) semana += h.v[j]; }
+      }
+      out.hoje_hora = hoje / 100; out.semana = { dia: H.semana, ate_hora: semana / 100, dia_inteiro: semanaDia / 100 };
+    }
+    return out;
   }
 
   /* ---------------- filtros ---------------- */
@@ -192,7 +290,9 @@ class Motor {
     let cont = 0;
     const tmp = new Int32Array(n);
     for (let i = 0; i < n; i++) if (mOK[m[i]] & pOK[p[i]] & cOK[c[i]] & rOK[r[i]]) tmp[cont++] = i;
-    const res = { idx: tmp.slice(0, cont), mOK: mOK };
+    // rOK e "outros" (filtro de produto ou cliente ligado): o cartão de hoje usa (ver cartaoHoje)
+    const res = { idx: tmp.slice(0, cont), mOK: mOK, rOK: rOK,
+                  outros: !!(sPro || sFor || sCom || sDep || sCat || sSub || sMar || sSta || sPro2 || sOri || sCli || sRam || sMun) };
     this.cacheFiltro.set(chave, res);
     if (this.cacheFiltro.size > 6) this.cacheFiltro.delete(this.cacheFiltro.keys().next().value);
     return res;
@@ -213,6 +313,7 @@ class Motor {
         if (ped.tipo === "resumo") out[ped.id] = this.resumo(idx, ef);
         else if (ped.tipo === "agrupar") out[ped.id] = this.agrupar(idx, ped, ef);
         else if (ped.tipo === "abc") out[ped.id] = this.abc(idx, ped);
+        else if (ped.tipo === "hoje") out[ped.id] = this.cartaoHoje(f, ped);
         else if (ped.tipo === "carteira") {
           const fb = Object.assign({}, f, ped.base || {});
           for (const k of Object.keys(fb)) if (fb[k] === null) delete fb[k];

@@ -13,8 +13,47 @@ L.carregarTudo = function () {
                       L.carregarJson("cc.json"), L.carregarJson("historico.json"), L.carregarJson("meta.json")])
     .then(function (r) {
       L.D = r[0]; L.META = r[5]; L.HIST = r[4]; L.ENT = r[2];
+      L.DBASE = { clientes: L.D.clientes.length, produtos: L.D.produtos.length, rcas: L.D.rcas.length, equipes: L.D.equipes.length, meses: L.D.meses.length };
       prepararDims(); prepararEstoque(r[1]); prepararCC(r[3]);
+      return L.sincronizarHoje().catch(function (e) { console.warn("venda de hoje:", e && e.message); });
     });
+};
+
+/* ------------------------------ a venda de hoje (AGENTE LUBE) ------------------------------
+   O arquivo da venda tem só dias fechados (até ontem). O servidor põe por cima a venda de hoje, que o agente lê do
+   WinThor de 30 em 30 s, e diz em /api/versao a versão dela e os clientes, produtos e RCAs que o arquivo ainda não tem
+   (cliente novo de hoje). A tela acrescenta esses extras às listas dela, nos mesmos índices do motor. */
+L.HOJE = null;
+L.aplicarHoje = function (h) {
+  var D = L.D, B = L.DBASE;
+  ["clientes", "produtos", "rcas", "equipes", "meses"].forEach(function (k) {
+    D[k].length = B[k];
+    if (h && h.extras && h.extras[k]) Array.prototype.push.apply(D[k], h.extras[k]);
+  });
+  L.HOJE = h && h.versao ? h : null;
+  prepararDims();
+};
+/* pergunta ao servidor; true = a venda de hoje mudou (a tela redesenha). Carga nova do arquivo = recarrega a página. */
+L.sincronizarHoje = function () {
+  return fetch("api/versao?hoje=1&_=" + Date.now(), { cache: "no-store" }).then(function (r) {
+    if (!r.ok) throw new Error("versão: " + r.status);
+    return r.json();
+  }).then(function (m) {
+    if (m.gerado_em && L.META && m.gerado_em !== L.META.gerado_em) { L.versaoMudou(); return false; }
+    var h = m.hoje || null;
+    if ((h ? h.versao : null) === (L.HOJE ? L.HOJE.versao : null) && (!h || h.dia === L.HOJE.dia)) return false;
+    L.aplicarHoje(h);
+    if (L.limparCacheConsulta) L.limparCacheConsulta();
+    return true;
+  });
+};
+/* a base da porcentagem com a venda de hoje nos totais: o período atual só com os dias fechados (decisão do Júlio,
+   2026-10-27). R[id + "_f"] vem do L.pedidosCmp; sem a venda de hoje, não existe e a tela compara como sempre. */
+L.cmpFechado = function (R, id) { var f = R && R[id + "_f"]; return f ? L.derivar(f) : null; };
+/* para os KPIs: põe `atual` (só dias fechados) na comparação, quando houver */
+L.comAtualFechado = function (cfgCmp, atF, campo) {
+  if (cfgCmp && atF && atF[campo] != null) cfgCmp.atual = atF[campo];
+  return cfgCmp;
 };
 
 function prepararDims() {
@@ -102,6 +141,8 @@ function prepararCC(j) {
 /* meses selecionados (índices), só até o último mês com dado */
 L.misDe = function (f) {
   var D = L.D, last = D.corte.mi, out = [];
+  // com a venda de hoje, o último mês com dado pode ser um mês novo (dia 1º, antes da carga da manhã ter esse mês)
+  if (L.HOJE && L.HOJE.meses && L.HOJE.meses.length) last = Math.max(last, L.HOJE.meses[L.HOJE.meses.length - 1]);
   for (var i = 0; i < D.meses.length && i <= last; i++) {
     var y = +D.meses[i].slice(0, 4), m = +D.meses[i].slice(5, 7);
     if (f.mis && f.mis.length) { if (f.mis.indexOf(i) < 0) continue; }
@@ -133,11 +174,15 @@ L.comparar = function (f) {
   var diasMes = new Date(y, m, 0).getDate();
   var parcial = mis.indexOf(pm) >= 0 && D.corte.dia < diasMes;
   var res = { mis: mis, rot: L.rotMis(mis), parcial: parcial, ateDia: L.fData(D.corte.ate), aa: null, pa: null };
-  var aaMis = mis.map(function (i) { return i - 12; });
+  // a comparação é só de dias fechados: um mês que só tem a venda de hoje (o dia 1º, antes da carga da manhã ter
+  // esse mês) fica fora dela — e se o período é só ele, ainda não há o que comparar
+  var misF = mis.filter(function (i) { return i <= pm; });
+  if (!misF.length) { res.semFechado = true; return res; }
+  var aaMis = misF.map(function (i) { return i - 12; });
   if (aaMis[0] >= 0) res.aa = { mis: aaMis, corte: parcial ? [pm - 12] : [], rot: L.rotMis(aaMis) };
-  var n = mis.length, cont = mis[mis.length - 1] - mis[0] + 1 === n;
+  var n = misF.length, cont = misF[misF.length - 1] - misF[0] + 1 === n;
   if (cont && n !== 12) {
-    var paMis = mis.map(function (i) { return i - n; });
+    var paMis = misF.map(function (i) { return i - n; });
     if (paMis[0] >= 0) res.pa = { mis: paMis, corte: parcial ? [pm - n] : [], rot: L.rotMis(paMis) };
   }
   return res;
@@ -149,7 +194,15 @@ L.pedidosCmp = function (id, tipo, extra, cmp) {
   var nul = { ano: null, mes: null, de: null, ate: null, mis: null };
   if (cmp && cmp.aa) out.push(Object.assign({}, base, { id: id + "_aa", filtros: Object.assign({}, base.filtros || {}, nul, { mis: cmp.aa.mis }), corte: cmp.aa.corte }));
   if (cmp && cmp.pa) out.push(Object.assign({}, base, { id: id + "_pa", filtros: Object.assign({}, base.filtros || {}, nul, { mis: cmp.pa.mis }), corte: cmp.pa.corte }));
+  // o atual só com dias fechados: os meses que têm venda de hoje entram "até o dia de corte" (as linhas de hoje valem 0)
+  var mh = L.mesesHojeNa(cmp);
+  if ((cmp && (cmp.aa || cmp.pa)) && mh.length) out.push(Object.assign({}, base, { id: id + "_f", corte: mh }));
   return out;
+};
+/* os meses com venda de hoje que estão no período */
+L.mesesHojeNa = function (cmp) {
+  if (!L.HOJE || !L.HOJE.linhas || !cmp || !cmp.mis) return [];
+  return L.HOJE.meses.filter(function (m) { return cmp.mis.indexOf(m) >= 0; });
 };
 /* filtros da API com o período já resolvido em `mis` (corta os meses sem dado) */
 L.filtrosComPeriodo = function () { var f = L.filtrosApi(); return f; };

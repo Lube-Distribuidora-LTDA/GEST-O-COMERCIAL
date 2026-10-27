@@ -100,6 +100,28 @@ L.kpi = function (cfg) {
 };
 L.kpis = function () { var g = L.h("div", { class: "kpis" }); for (var i = 0; i < arguments.length; i++) L.add(g, arguments[i]); return g; };
 
+/* cartão "Hoje até agora" (a venda de hoje do AGENTE LUBE): hoje contra o mesmo dia da semana passada até a mesma
+   hora — a forma justa de comparar um dia que ainda não acabou (decisão do Júlio, 2026-10-27). h = pedido "hoje". */
+L.cartaoHoje = function (h) {
+  var SEM = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+  var fBR0 = function (v) { return L.fBRL(v, 0); };
+  var diaDe = function (s) { return new Date(s + "T12:00:00"); };
+  var lido = L.HOJE && L.HOJE.mudou_em ? new Date(L.HOJE.mudou_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
+  var leg = L.h("div", { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+    L.h("span", { text: L.fInt(h.pos) + (h.pos === 1 ? " cliente" : " clientes") + " · venda lida do WinThor às " + lido }));
+  if (h.semana) {
+    var linha = L.h("div", { class: "cmp-linha" });
+    linha.appendChild(L.delta({ atual: h.hoje_hora, base: h.semana.ate_hora }));
+    linha.appendChild(L.h("small", { text: "vs " + SEM[diaDe(h.semana.dia).getDay()] + " passada (" + L.fData(h.semana.dia).slice(0, 5) + ") até as " +
+      h.hora + "h59: " + fBR0(h.semana.ate_hora) + " · o dia inteiro: " + fBR0(h.semana.dia_inteiro) }));
+    leg.appendChild(linha);
+  } else if (h.so_rca) {
+    leg.appendChild(L.h("small", { text: "A comparação com a semana passada sai só com filtros de RCA, equipe e estado (a venda por hora não tem cliente nem produto)." }));
+  }
+  return L.kpis(L.kpi({ icone: "relogio", rot: "Hoje até agora · " + SEM[diaDe(h.dia).getDay()] + ", " + L.fData(h.dia).slice(0, 5), valor: h.venda, fmt: fBR0,
+    classe: "heroi", leg: leg, ajuda: "Venda líquida de hoje, lida do WinThor pelo agente de 30 em 30 segundos. Ela já entra nos totais das telas; as porcentagens contra o ano e o período anterior usam só os dias fechados." }));
+};
+
 /* esperas: o caminhão da Lube (o mesmo desenho do portal) rodando, com painéis caindo no baú.
    Os painéis ficam ATRÁS do baú no desenho, então ao descer eles somem para dentro dele. */
 var camUid = 0;

@@ -26,33 +26,37 @@ L.registrarPagina({
     var misBase = mesesAtual.map(function (mm) { return idxMes(yAnt, mm); }).filter(function (i) { return i >= 0; });
     var cortePar = parcial && yAt === yc && misAtual.indexOf(D.corte.mi) >= 0 ? [D.corte.mi - 12] : [];
     var fa = Object.assign({}, F, { mis: misAtual }), fb = Object.assign({}, F, { mis: misBase });
+    // a venda de hoje: o total do ano mostra; a comparação (porcentagens, medidor, tabelas e meses) fica só com dias fechados
+    var mh = L.mesesHojeNa({ mis: misAtual });
     var ped = [
       { id: "a", tipo: "resumo", filtros: fa }, { id: "b", tipo: "resumo", filtros: fb, corte: cortePar },
-      { id: "ca", tipo: "agrupar", por: "comprador", dist: ["pos", "skus"], filtros: fa }, { id: "cb", tipo: "agrupar", por: "comprador", dist: ["pos", "skus"], filtros: fb, corte: cortePar },
-      { id: "ma", tipo: "agrupar", por: "mes", filtros: fa }, { id: "mb", tipo: "agrupar", por: "mes", filtros: fb, corte: cortePar },
-      { id: "da", tipo: "agrupar", por: "depto", filtros: fa }, { id: "db", tipo: "agrupar", por: "depto", filtros: fb, corte: cortePar },
-    ];
+      { id: "ca", tipo: "agrupar", por: "comprador", dist: ["pos", "skus"], filtros: fa, corte: mh }, { id: "cb", tipo: "agrupar", por: "comprador", dist: ["pos", "skus"], filtros: fb, corte: cortePar },
+      { id: "ma", tipo: "agrupar", por: "mes", filtros: fa, corte: mh }, { id: "mb", tipo: "agrupar", por: "mes", filtros: fb, corte: cortePar },
+      { id: "da", tipo: "agrupar", por: "depto", filtros: fa, corte: mh }, { id: "db", tipo: "agrupar", por: "depto", filtros: fb, corte: cortePar },
+    ].concat(mh.length ? [{ id: "af", tipo: "resumo", filtros: fa, corte: mh }] : []);
     return L.consultar(ped, { filtros: {} }).then(function (j) {
       var R = j.resultados, a = L.derivar(R.a), b = L.derivar(R.b), C = L.cores();
+      var af = R.af ? L.derivar(R.af) : null, ac = af || a;     // ac = o ano atual só com dias fechados
       var per = L.rotMis(misAtual);
       var seg = L.h("div", { class: "seg" });
       L.anos.slice(1).forEach(function (y) { seg.appendChild(L.h("button", { type: "button", class: y === yAt ? "on" : "", text: String(y), onclick: function () { L.estado.params = { atual: y }; refazer(); } })); });
       raiz.appendChild(L.h("div", { style: { display: "flex", gap: "12px", alignItems: "center", marginBottom: "14px", flexWrap: "wrap" } },
         L.h("span", { class: "fx-rot", text: "Comparar o ano" }), seg,
-        L.h("span", { style: { color: "var(--t3)", font: "500 13px var(--f-txt)" }, text: "com " + yAnt + " · " + per + (cortePar.length ? " · mesmo número de dias (até " + L.fData(D.corte.ate).slice(0, 5) + ")" : "") })));
+        L.h("span", { style: { color: "var(--t3)", font: "500 13px var(--f-txt)" }, text: "com " + yAnt + " · " + per + (cortePar.length ? " · mesmo número de dias (até " + L.fData(D.corte.ate).slice(0, 5) + ")" : "") +
+          (mh.length ? " · a venda de hoje entra só no total do ano" : "") })));
       var fBR0 = function (v) { return L.fBRL(v, 0); };
-      var kc = function (valor, base, fmt) { return { cmp: { aa: { rot: String(yAnt), mis: misBase } }, aa: base, fmt: fmt }; };
+      var kc = function (campo, fmt) { return L.comAtualFechado({ cmp: { aa: { rot: String(yAnt), mis: misBase } }, aa: b[campo], fmt: fmt }, af, campo); };
       raiz.appendChild(L.kpis(
-        L.kpi({ icone: "dinheiro", rot: "Venda " + yAt, valor: a.venda, fmt: fBR0, classe: "heroi", cmp: kc(a.venda, b.venda, fBR0), leg: L.h("span", { text: yAnt + ": " + L.fBRL(b.venda, 0) }) }),
-        L.kpi({ icone: "pessoas", rot: "Positivação", valor: a.pos, fmt: L.fInt, cmp: kc(a.pos, b.pos, L.fInt), leg: L.h("span", { text: yAnt + ": " + L.fInt(b.pos) }) }),
-        L.kpi({ icone: "caixa", rot: "Quantidade", valor: a.qtd, fmt: L.fInt, cmp: kc(a.qtd, b.qtd, L.fInt), leg: L.h("span", { text: yAnt + ": " + L.fInt(b.qtd) }) }),
-        L.kpi({ icone: "camadas", rot: "SKUs vendidos", valor: a.skus, fmt: L.fInt, cmp: kc(a.skus, b.skus, L.fInt), leg: L.h("span", { text: yAnt + ": " + L.fInt(b.skus) }) }),
-        L.kpi({ icone: "etiqueta", rot: "Ticket médio", valor: a.ticket, fmt: fBR0, cmp: kc(a.ticket, b.ticket, fBR0), leg: L.h("span", { text: yAnt + ": " + L.fBRL(b.ticket, 0) }) })));
+        L.kpi({ icone: "dinheiro", rot: "Venda " + yAt, valor: a.venda, fmt: fBR0, classe: "heroi", cmp: kc("venda", fBR0), leg: L.h("span", { text: yAnt + ": " + L.fBRL(b.venda, 0) }) }),
+        L.kpi({ icone: "pessoas", rot: "Positivação", valor: a.pos, fmt: L.fInt, cmp: kc("pos", L.fInt), leg: L.h("span", { text: yAnt + ": " + L.fInt(b.pos) }) }),
+        L.kpi({ icone: "caixa", rot: "Quantidade", valor: a.qtd, fmt: L.fInt, cmp: kc("qtd", L.fInt), leg: L.h("span", { text: yAnt + ": " + L.fInt(b.qtd) }) }),
+        L.kpi({ icone: "camadas", rot: "SKUs vendidos", valor: a.skus, fmt: L.fInt, cmp: kc("skus", L.fInt), leg: L.h("span", { text: yAnt + ": " + L.fInt(b.skus) }) }),
+        L.kpi({ icone: "etiqueta", rot: "Ticket médio", valor: a.ticket, fmt: fBR0, cmp: kc("ticket", fBR0), leg: L.h("span", { text: yAnt + ": " + L.fBRL(b.ticket, 0) }) })));
       // medidor
-      var pMed = L.painel({ titulo: "Venda " + yAt + " contra " + yAnt, sub: per, classe: "c-4" });
+      var pMed = L.painel({ titulo: "Venda " + yAt + " contra " + yAnt, sub: per + (af ? " · só dias fechados" : ""), classe: "c-4" });
       var gm = L.h("div"); pMed.corpo.appendChild(gm);
-      L.graf.medidor(gm, { valor: a.venda, ref: b.venda, fmt: function (v) { return L.fAbrev(v, true); }, legenda: "do realizado em " + yAnt, altura: 230 });
-      pMed.corpo.appendChild(L.h("div", { style: { textAlign: "center", font: "600 13px var(--f-txt)", color: "var(--t2)", marginTop: "-2px" }, html: "Diferença: <b class='num' style='color:" + (a.venda >= b.venda ? "var(--ok)" : "var(--perigo)") + "'>" + L.esc(L.fBRL(a.venda - b.venda, 0)) + "</b>" }));
+      L.graf.medidor(gm, { valor: ac.venda, ref: b.venda, fmt: function (v) { return L.fAbrev(v, true); }, legenda: "do realizado em " + yAnt, altura: 230 });
+      pMed.corpo.appendChild(L.h("div", { style: { textAlign: "center", font: "600 13px var(--f-txt)", color: "var(--t2)", marginTop: "-2px" }, html: "Diferença: <b class='num' style='color:" + (ac.venda >= b.venda ? "var(--ok)" : "var(--perigo)") + "'>" + L.esc(L.fBRL(ac.venda - b.venda, 0)) + "</b>" }));
       // mensal
       var mA = {}, mB = {}; R.ma.linhas.forEach(function (l) { mA[l.k] = l.venda; }); R.mb.linhas.forEach(function (l) { mB[l.k] = l.venda; });
       var pMes = L.painel({ titulo: "Venda mês a mês", sub: yAt + " contra " + yAnt, classe: "c-8" });
@@ -133,12 +137,15 @@ L.registrarPagina({
       var hbAa = R.hb_aa ? L.derivar(R.hb_aa) : null, hbPa = R.hb_pa ? L.derivar(R.hb_pa) : null, totAa = R.tot_aa ? L.derivar(R.tot_aa) : null, totPa = R.tot_pa ? L.derivar(R.tot_pa) : null;
       var sem = tot.venda - hb.venda, pct = L.div(hb.venda, tot.venda);
       var pctAa = totAa ? L.div(hbAa.venda, totAa.venda) : null, pctPa = totPa ? L.div(hbPa.venda, totPa.venda) : null;
+      // com a venda de hoje nos totais: as porcentagens comparam só os dias fechados
+      var hbF = L.cmpFechado(R, "hb"), totF = L.cmpFechado(R, "tot");
+      var pctF = hbF && totF ? L.div(hbF.venda, totF.venda) : null;
       var fBR0 = function (v) { return L.fBRL(v, 0); }, f2 = function (v) { return L.fNum(v, 2) + "%"; };
       raiz.appendChild(L.kpis(
-        L.kpi({ icone: "estrela", rot: "Venda Higiene & Beleza", valor: hb.venda, fmt: fBR0, classe: "heroi", cmp: cmp ? { cmp: cmp, aa: hbAa ? hbAa.venda : null, pa: hbPa ? hbPa.venda : null, fmt: fBR0 } : null, aoClicar: function () { L.abrirDossie({ dim: "depto", id: iHB }); }, leg: L.h("span", { text: L.fInt(hb.pos) + " clientes · " + L.fInt(hb.skus) + " SKUs" }) }),
-        L.kpi({ icone: "percent", rot: "% da venda total", valor: pct == null ? null : pct * 100, fmt: f2, cmp: cmp ? { cmp: cmp, aa: pctAa != null ? pctAa * 100 : null, pa: pctPa != null ? pctPa * 100 : null, fmt: f2, pp: true } : null, leg: L.h("span", { text: "participação de H&B na venda" }) }),
+        L.kpi({ icone: "estrela", rot: "Venda Higiene & Beleza", valor: hb.venda, fmt: fBR0, classe: "heroi", cmp: cmp ? L.comAtualFechado({ cmp: cmp, aa: hbAa ? hbAa.venda : null, pa: hbPa ? hbPa.venda : null, fmt: fBR0 }, hbF, "venda") : null, aoClicar: function () { L.abrirDossie({ dim: "depto", id: iHB }); }, leg: L.h("span", { text: L.fInt(hb.pos) + " clientes · " + L.fInt(hb.skus) + " SKUs" }) }),
+        L.kpi({ icone: "percent", rot: "% da venda total", valor: pct == null ? null : pct * 100, fmt: f2, cmp: cmp ? L.comAtualFechado({ cmp: cmp, aa: pctAa != null ? pctAa * 100 : null, pa: pctPa != null ? pctPa * 100 : null, fmt: f2, pp: true }, pctF != null ? { p: pctF * 100 } : null, "p") : null, leg: L.h("span", { text: "participação de H&B na venda" }) }),
         L.kpi({ icone: "dinheiro", rot: "Venda sem H&B", valor: sem, fmt: fBR0, leg: L.h("span", { text: "demais departamentos" }) }),
-        L.kpi({ icone: "etiqueta", rot: "Ticket H&B", valor: hb.ticket, fmt: fBR0, cmp: cmp ? { cmp: cmp, aa: hbAa ? hbAa.ticket : null, pa: hbPa ? hbPa.ticket : null, fmt: fBR0 } : null, leg: L.h("span", { text: "mix de H&B: " + L.fNum(hb.mix, 1) + " itens/cliente" }) })));
+        L.kpi({ icone: "etiqueta", rot: "Ticket H&B", valor: hb.ticket, fmt: fBR0, cmp: cmp ? L.comAtualFechado({ cmp: cmp, aa: hbAa ? hbAa.ticket : null, pa: hbPa ? hbPa.ticket : null, fmt: fBR0 }, hbF, "ticket") : null, leg: L.h("span", { text: "mix de H&B: " + L.fNum(hb.mix, 1) + " itens/cliente" }) })));
       var corHB = C.d[2], corSem = C.d[0];
       var pRos = L.painel({ titulo: "Venda H&B contra o restante", classe: "c-4", sub: cmp ? cmp.rot : "" });
       var gR = L.h("div"); pRos.corpo.appendChild(gR);
@@ -211,10 +218,11 @@ L.registrarPagina({
     return L.consultar(ped).then(function (j) {
       var R = j.resultados, C = L.cores(), at = L.derivar(R.res), aa = R.res_aa ? L.derivar(R.res_aa) : null, pa = R.res_pa ? L.derivar(R.res_pa) : null;
       var fBR0 = function (v) { return L.fBRL(v, 0); }, f2 = function (v) { return L.fNum(v, 2) + "%"; };
-      var kc = function (campo, fmt) { return cmp ? { cmp: cmp, aa: aa ? aa[campo] : null, pa: pa ? pa[campo] : null, fmt: fmt, inverso: true } : null; };
+      var atF = L.cmpFechado(R, "res");          // com a venda de hoje nos totais: a % compara só os dias fechados
+      var kc = function (campo, fmt) { return cmp ? L.comAtualFechado({ cmp: cmp, aa: aa ? aa[campo] : null, pa: pa ? pa[campo] : null, fmt: fmt, inverso: true }, atF, campo) : null; };
       raiz.appendChild(L.kpis(
         L.kpi({ icone: "devolucao", rot: "Devoluções", valor: at.dev, fmt: fBR0, classe: "heroi", cmp: kc("dev", fBR0), aoClicar: function () { L.abrirDossie({ dim: null }); }, leg: L.h("span", { text: "valor devolvido no período" }) }),
-        L.kpi({ icone: "percent", rot: "% sobre a venda bruta", valor: at.pctDev == null ? null : at.pctDev * 100, fmt: f2, classe: at.pctDev > 0.04 ? "atencao" : "", cmp: cmp ? { cmp: cmp, aa: aa ? aa.pctDev * 100 : null, pa: pa ? pa.pctDev * 100 : null, fmt: f2, pp: true, inverso: true } : null, leg: L.h("span", { text: "bruta " + L.fAbrev(at.bruta, true) }) }),
+        L.kpi({ icone: "percent", rot: "% sobre a venda bruta", valor: at.pctDev == null ? null : at.pctDev * 100, fmt: f2, classe: at.pctDev > 0.04 ? "atencao" : "", cmp: cmp ? L.comAtualFechado({ cmp: cmp, aa: aa ? aa.pctDev * 100 : null, pa: pa ? pa.pctDev * 100 : null, fmt: f2, pp: true, inverso: true }, atF && atF.pctDev != null ? { p: atF.pctDev * 100 } : null, "p") : null, leg: L.h("span", { text: "bruta " + L.fAbrev(at.bruta, true) }) }),
         L.kpi({ icone: "pessoas", rot: "Clientes com devolução", valor: at.pos_dev, fmt: L.fInt, cmp: kc("pos_dev", L.fInt), leg: L.h("span", { text: L.fPct(L.div(at.pos_dev, at.pos), 1) + " dos positivados" }) }),
         L.kpi({ icone: "etiqueta", rot: "Devolução por cliente", valor: L.div(at.dev, at.pos_dev), fmt: fBR0, leg: L.h("span", { text: "ticket médio de devolução" }) }),
         L.kpi({ icone: "caixa", rot: "Unidades devolvidas", valor: at.qtd_dev, fmt: L.fInt, leg: L.h("span", { text: L.fPct(L.div(at.qtd_dev, at.qtd + at.qtd_dev), 2) + " das unidades vendidas" }) })));

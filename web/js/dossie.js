@@ -175,7 +175,8 @@ function abaResumo(ent, scope, cmp) {
   return L.consultar(ped, { canal: "dossie", filtros: {} }).then(function (j) {
     var R = j.resultados, at = L.derivar(R.r), aa = R.r_aa ? L.derivar(R.r_aa) : null, pa = R.r_pa ? L.derivar(R.r_pa) : null, glob = R.glob;
     var raiz = L.h("div");
-    var kc = function (campo, fmt, extra) { return cmp ? Object.assign({ cmp: cmp, aa: aa ? aa[campo] : null, pa: pa ? pa[campo] : null, fmt: fmt }, extra || {}) : null; };
+    var atF = L.cmpFechado(R, "r");            // com a venda de hoje nos totais: a % compara só os dias fechados
+    var kc = function (campo, fmt, extra) { return cmp ? L.comAtualFechado(Object.assign({ cmp: cmp, aa: aa ? aa[campo] : null, pa: pa ? pa[campo] : null, fmt: fmt }, extra || {}), atF, campo) : null; };
     var fBR0 = function (v) { return L.fBRL(v, 0); }, part = glob && glob.venda ? at.venda / glob.venda : null;
     raiz.appendChild(L.kpis(
       L.kpi({ icone: "dinheiro", rot: "Venda líquida", valor: at.venda, fmt: fBR0, classe: "heroi", cmp: kc("venda", fBR0),
