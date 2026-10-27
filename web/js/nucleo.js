@@ -200,9 +200,13 @@ L.versaoMudou = function () {
   setTimeout(function () { location.reload(); }, 900);
 };
 
-L.carregarJson = function (nome) {
-  return fetch("dados/" + nome).then(function (r) {
-    if (r.ok) return r.json();
+/* a versão (sha1) de cada arquivo que a tela tem: o estoque, a conta corrente, as entradas e o histórico mudam ao vivo, e
+   ela baixa de novo só o que o servidor diz que mudou. `h` = a versão que a tela quer (a cópia do servidor que tiver
+   outra confere o banco antes de responder). */
+L.VERSOES = {};
+L.carregarJson = function (nome, h) {
+  return fetch("dados/" + nome + (h ? "?h=" + encodeURIComponent(h) : ""), h ? { cache: "no-store" } : undefined).then(function (r) {
+    if (r.ok) { L.VERSOES[nome] = r.headers.get("X-Versao") || h || L.VERSOES[nome]; return r.json(); }
     // a função diz o motivo em JSON ({erro}); sem isso a tela só sabia que "faltou um arquivo"
     return r.json().catch(function () { return {}; }).then(function (j) {
       throw new Error(r.status === 401 ? "Sua sessão do Painel Lube expirou. Entre de novo pelo portal."

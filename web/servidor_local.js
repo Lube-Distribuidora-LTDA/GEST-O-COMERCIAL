@@ -31,7 +31,7 @@ const MIME = {
   ".ico": "image/x-icon", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".txt": "text/plain; charset=utf-8",
 };
 // o que nunca é entregue ao navegador
-const BLOQUEADOS = [/^\/dados\/venda\.bin\.gz$/, /^\/dados\/imagens\.json$/, /^\/motor\.js$/, /^\/servidor_local\.js$/, /^\/fonte_dados\.js$/, /^\/pacote\.js$/, /^\/hoje\.js$/,
+const BLOQUEADOS = [/^\/dados\/venda\.bin\.gz$/, /^\/dados\/imagens\.json$/, /^\/motor\.js$/, /^\/servidor_local\.js$/, /^\/fonte_dados\.js$/, /^\/pacote\.js$/, /^\/hoje\.js$/, /^\/bases\.js$/,
   /^\/api\//, /^\/package/, /^\/node_modules\//, /^\/db\//, /^\/cache_img\//, /^\/middleware\.ts$/, /^\/sentinela-guarda\.ts$/, /^\/vercel\.json$/, /^\/\./];
 
 /* ------------------------------ respostas ------------------------------ */
@@ -44,10 +44,12 @@ function gz(req, res, tipo, corpo, extra) {
   } else { res.writeHead(200, h); res.end(buf); }
 }
 
-/* arquivo do pacote que está na memória (dims, estoque, entradas, cc, historico, meta) */
-function doPacote(req, res, e, nome) {
+/* arquivo do pacote que está na memória (dims, estoque, entradas, cc, historico, meta); a versão vai em X-Versao (bases.js) */
+async function doPacote(req, res, e, nome, url) {
+  try { await P.conferirBase(e, nome, url.searchParams.get("h") || ""); }
+  catch (err) { console.error("[dados] não consegui conferir a versão:", err && err.message); }
   const a = P.arquivoPublico(e, nome);
-  const h = { "Content-Type": MIME[".json"], "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff", "Vary": "Accept-Encoding" };
+  const h = { "Content-Type": MIME[".json"], "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff", "Vary": "Accept-Encoding", "X-Versao": a.versao };
   if (/gzip/.test(req.headers["accept-encoding"] || "")) { h["Content-Encoding"] = "gzip"; res.writeHead(200, h); return res.end(a.gz); }
   res.writeHead(200, h); res.end(a.bruto);
 }
@@ -58,7 +60,7 @@ function estatico(req, res, url) {
   if (rel === "/") rel = "/index.html";
   if (BLOQUEADOS.some(r => r.test(rel))) { res.writeHead(404); return res.end("não encontrado"); }
   const e = P.estadoAtual();
-  if (e && /^\/dados\/[\w.-]+\.json$/.test(rel) && P.arquivoPublico(e, rel.slice(7))) return doPacote(req, res, e, rel.slice(7));
+  if (e && /^\/dados\/[\w.-]+\.json$/.test(rel) && P.arquivoPublico(e, rel.slice(7))) return doPacote(req, res, e, rel.slice(7), url);
   const arq = path.normalize(path.join(RAIZ, rel));
   if (!arq.startsWith(RAIZ)) { res.writeHead(403); return res.end(); }
   fs.stat(arq, (err, st) => {
@@ -175,7 +177,7 @@ http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/versao") {
       if (url.searchParams.get("verificar")) await P.verificar();          // botão "atualizar": pergunta ao banco agora
-      if (url.searchParams.get("verificar") || url.searchParams.get("hoje")) await P.verificarHoje();   // a venda de hoje
+      if (url.searchParams.get("verificar") || url.searchParams.get("hoje")) await Promise.all([P.verificarHoje(), P.verificarBases()]);   // a venda de hoje e as bases
       const e = P.estadoAtual();
       if (!e) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end('{"erro":"sem dados"}'); }
       return gz(req, res, "application/json; charset=utf-8", JSON.stringify(P.infoVersao(e, { fotos: pastaFotos() ? "ok" : "pasta FOTOS_ION fora do ar" })));
@@ -192,5 +194,6 @@ http.createServer(async (req, res) => {
   P.carregar().catch(e => console.error("falha ao montar o pacote:", e && e.stack || e)).then(() => {
     setInterval(P.verificar, P.INTERVALO_MS);
     setInterval(P.verificarHoje, P.INTERVALO_HOJE_MS);                 // a venda de hoje, do AGENTE LUBE
+    setInterval(P.verificarBases, P.INTERVALO_HOJE_MS);                // estoque, conta corrente, entradas e fotos, do agente
   });
 });

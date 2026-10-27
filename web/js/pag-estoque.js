@@ -163,7 +163,7 @@ L.registrarPagina({
     var pLista = L.painel({ titulo: "Itens em ruptura", sub: "maior venda perdida primeiro · clique em um item para abrir o relatório dele", classe: "c-12", semPad: true, corpo: tab });
 
     // histórico
-    var h = L.HIST || [], pHist = L.painel({ titulo: "Evolução do % de ruptura", sub: "uma foto por carga, por comprador", classe: "c-12" });
+    var h = L.HIST || [], pHist = L.painel({ titulo: "Evolução do % de ruptura", sub: "uma foto por dia, por comprador" + (L.BASES && L.BASES.modo && L.BASES.modo.estoque === "agente" ? "; a de hoje, ao vivo" : ""), classe: "c-12" });
     if (h.length >= 2) {
       var gH = L.h("div"); pHist.corpo.appendChild(gH);
       // o histórico é guardado por CÓDIGO de comprador (o índice das dimensões muda a cada carga); -1 = sem comprador

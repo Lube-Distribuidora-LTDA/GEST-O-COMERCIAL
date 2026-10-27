@@ -179,14 +179,41 @@ def imagens_do_banco(conn) -> dict:
     return out
 
 
-def gravar_imagens(conn, mapa: dict) -> int:
-    linhas = [(int(c), v["arquivo"], v.get("bytes"), v.get("modificado")) for c, v in mapa.items()]
+def _assinatura_foto(v: dict) -> tuple:
+    """(arquivo, bytes, segundo da modificação): o que diz se a foto mudou. A data vem do banco com o fuso da sessão e
+    da pasta em UTC; comparar o instante, e não o texto, evita regravar tudo por diferença de fuso."""
+    m = v.get("modificado")
+    if m:
+        try:
+            m = int(datetime.fromisoformat(str(m)).timestamp())
+        except ValueError:
+            pass
+    return (v.get("arquivo"), int(v.get("bytes") or 0), m)
+
+
+def gravar_imagens(conn, mapa: dict, do_banco: dict | None = None) -> int:
+    """Grava só a diferença entre a pasta e o banco (foto nova, trocada ou que saiu) e devolve quantas linhas mudaram.
+
+    Até 2026-10-27 era TRUNCATE + INSERT a cada carga. Com a tarefa "Trade - Fotos" de 5 em 5 min e o painel lendo esta
+    tabela para saber quem tem foto (os produtos sem imagem ao vivo), regravar tudo trancava a tabela e mudava o
+    atualizado_em de todas as linhas: agora só muda a linha da foto que mudou, e é por ela que o painel percebe."""
+    antes = imagens_do_banco(conn) if do_banco is None else do_banco
+    novo = {int(c): v for c, v in mapa.items()}
+    mudaram = [(c, v["arquivo"], v.get("bytes"), v.get("modificado")) for c, v in novo.items()
+               if c not in antes or _assinatura_foto(antes[c]) != _assinatura_foto(v)]
+    sairam = [c for c in antes if c not in novo]
+    if not mudaram and not sairam:
+        return 0
     with conn.cursor() as cur:
-        cur.execute(f"TRUNCATE {SCHEMA}.produto_imagem")
-        psycopg2.extras.execute_values(
-            cur, f"INSERT INTO {SCHEMA}.produto_imagem (codprod, arquivo, bytes, modificado_em) VALUES %s", linhas, page_size=5000)
+        if sairam:
+            cur.execute(f"DELETE FROM {SCHEMA}.produto_imagem WHERE codprod = ANY(%s)", (sairam,))
+        if mudaram:
+            psycopg2.extras.execute_values(
+                cur, f"INSERT INTO {SCHEMA}.produto_imagem (codprod, arquivo, bytes, modificado_em) VALUES %s "
+                     "ON CONFLICT (codprod) DO UPDATE SET arquivo = EXCLUDED.arquivo, bytes = EXCLUDED.bytes, "
+                     "modificado_em = EXCLUDED.modificado_em, atualizado_em = now()", mudaram, page_size=2000)
     conn.commit()
-    return len(linhas)
+    return len(mudaram) + len(sairam)
 
 
 # ---------------------------------------------------------------------------

@@ -47,9 +47,18 @@ function atualizarRodape() {
          'com o ano e o período anterior usam só os dias fechados."><span class="vivo"></span><b>Ao vivo · venda de hoje até ' + hora + "</b></div>" +
          "<div>Dias fechados até " + L.fData(D.corte.ate) + "</div>"
        : '<div><span class="vivo"></span><b>Dados até ' + L.fData(D.corte.ate) + "</b></div>") +
+    rodapeBases() +
     "<div>Carga de " + L.fDataHora(M.gerado_em) + "</div>" +
     "<div>" + L.fInt(M.linhas_venda) + " linhas de venda</div>" +
     "<div>versão " + (window.VERSAO || "") + "</div>";
+}
+/* estoque e conta corrente pelo agente: a hora da última mudança do estoque (versão AAAAMMDD-HHMMSS, hora de Brasília) */
+function rodapeBases() {
+  var B = L.BASES;
+  if (!B || !B.modo || B.modo.estoque !== "agente") return "";
+  var v = (B.leitura && B.leitura.estoque_posicao) || "", hora = v.length >= 13 ? v.slice(9, 11) + ":" + v.slice(11, 13) : "";
+  return '<div title="Estoque, ruptura, sem venda, cobertura e sugestão de minuto em minuto; conta corrente e custo de compra de ' +
+         '2 em 2 minutos; fotos de 5 em 5 minutos. A tela troca sozinha."><span class="vivo"></span>Estoque ao vivo' + (hora ? " · " + hora : "") + "</div>";
 }
 L.atualizarRodape = atualizarRodape;
 function marcarMenu() {
@@ -195,10 +204,17 @@ function conferirCarga(motivo) {
 function textoPedido(p) {
   if (!p || p.status === "expirado") return "O agente não respondeu a tempo. A tela segue com a última leitura.";
   if (p.status === "erro") return "Não consegui ler o WinThor agora: " + (p.mensagem || "erro sem detalhe") + ".";
-  var d = p.detalhe || {}, v = d["trade.venda_dia"] || {}, n = Math.max(v.novas || 0, v.apagadas || 0);
+  var d = p.detalhe || {}, v = d["trade.venda_dia"] || {};
+  function n(f) { var x = d[f] || {}; return (x.novas || 0) + (x.alteradas || 0) + (x.apagadas || 0); }
+  function q(k, um, varios) { return L.fInt(k) + " " + (k === 1 ? um : varios); }
+  var partes = [], nv = Math.max(v.novas || 0, v.apagadas || 0), ne = n("trade.estoque_posicao") + n("trade.estoque_giro");
+  if (nv) partes.push("a venda de hoje (" + q(nv, "linha", "linhas") + ")");
+  if (ne) partes.push("o estoque (" + q(ne, "produto", "produtos") + ")");
+  if (n("trade.cc_lancamento")) partes.push("a conta corrente (" + q(n("trade.cc_lancamento"), "lançamento", "lançamentos") + ")");
+  if (n("trade.entrada_mes")) partes.push("o custo de compra (" + q(n("trade.entrada_mes"), "entrada", "entradas") + ")");
   return "WinThor lido agora (" + L.fNum(p.segundos || 0, 1) + " s): " +
-    (n ? L.fInt(n) + (n === 1 ? " linha de venda de hoje entrou ou mudou." : " linhas de venda de hoje entraram ou mudaram.")
-       : "nada mudou na venda de hoje desde a última leitura.");
+    (partes.length ? "mudou " + (partes.length > 1 ? partes.slice(0, -1).join(", ") + " e " + partes[partes.length - 1] : partes[0]) + "."
+                   : "nada mudou desde a última leitura.");
 }
 function esperarPedido(id) {
   var limite = Date.now() + 90000;

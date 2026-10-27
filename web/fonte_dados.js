@@ -98,9 +98,69 @@ function versaoNoAr() {
 }
 
 /* ---- a venda de hoje (AGENTE LUBE, ver hoje.js) ---- */
-/* a versão que o agente marca a cada gravação no schema trade (consulta levíssima) */
+/* a versão da venda: quando o agente gravou por último um dos fluxos da venda (consulta levíssima). Até 2026-10-27 era
+   a versão do sistema 'trade' inteiro; com o estoque e a conta corrente no agente ela muda de minuto em minuto, e a
+   venda de hoje seria montada de novo sem ter mudado. Mesmo formato (AAAAMMDD-HHMMSS.mmm, hora de Brasília). */
+const FLUXOS_VENDA = ["trade.venda_dia", "trade.venda_dia_3d", "trade.venda_hora"];
 function versaoHoje() {
-  return comConexao(async c => (await c.query(`SELECT versao, mudou_em FROM agente.sistema WHERE sistema = 'trade'`)).rows[0] || null);
+  return comConexao(async c => (await c.query(
+    `SELECT to_char(max(mudou_em) AT TIME ZONE 'America/Sao_Paulo', 'YYYYMMDD-HH24MISS.MS') AS versao, max(mudou_em) AS mudou_em
+       FROM agente.estado WHERE fluxo = ANY($1::text[])`, [FLUXOS_VENDA])).rows[0] || null);
+}
+
+/* ---- estoque, conta corrente, entradas e fotos ao vivo (ver bases.js) ---- */
+const FLUXOS_BASES = ["trade.estoque_posicao", "trade.estoque_giro", "trade.entrada_mes", "trade.cc_lancamento"];
+/* quando o agente gravou cada tabela, e se a última leitura dele é mais nova que o arquivo da carga no ar (`fresco`);
+   e a assinatura das fotos (quantas, quais, a última mudança). Consulta levíssima: a tela pergunta de 15 em 15 s. */
+function versaoBases() {
+  return comConexao(async c => {
+    const f = await c.query(
+      `SELECT e.fluxo, to_char(e.mudou_em AT TIME ZONE 'America/Sao_Paulo', 'YYYYMMDD-HH24MISS.MS') AS versao,
+              (e.mudou_em IS NOT NULL AND e.lido_em > pv.gerado_em) AS fresco
+         FROM agente.estado e CROSS JOIN ${SCHEMA}.pacote_versao pv
+        WHERE pv.id = 1 AND e.fluxo = ANY($1::text[]) ORDER BY e.fluxo`, [FLUXOS_BASES]);
+    const i = await c.query(
+      `SELECT count(*) || ':' || coalesce(sum(codprod), 0) || ':' ||
+              coalesce(to_char(max(atualizado_em) AT TIME ZONE 'UTC', 'YYYYMMDD-HH24MISS.US'), '') AS assinatura
+         FROM ${SCHEMA}.produto_imagem`);
+    return { fluxos: Object.fromEntries(f.rows.map(r => [r.fluxo, { versao: r.versao, fresco: r.fresco }])), fotos: i.rows[0].assinatura };
+  });
+}
+/* datas como texto (AAAA-MM-DD) e números como float8: o node-pg devolve numeric como texto e date como meia-noite local */
+function lerPosicao() {
+  return comConexao(async c => (await c.query(
+    `SELECT codprod, estoque::float8 AS estoque, reservado::float8 AS reservado, bloq_semav::float8 AS bloq_semav, avaria::float8 AS avaria,
+            disponivel::float8 AS disponivel, valor_custo::float8 AS valor_custo, pvenda::float8 AS pvenda, pendente::float8 AS pendente
+       FROM ${SCHEMA}.estoque_posicao`)).rows);
+}
+function lerGiro() {
+  return comConexao(async c => (await c.query(
+    `SELECT codprod, s0::float8 AS s0, s1::float8 AS s1, s2::float8 AS s2, s3::float8 AS s3, s4::float8 AS s4, s5::float8 AS s5,
+            s6::float8 AS s6, s7::float8 AS s7, s8::float8 AS s8, venda56::float8 AS venda56,
+            to_char(primeira, 'YYYY-MM-DD') AS primeira, to_char(ultima, 'YYYY-MM-DD') AS ultima
+       FROM ${SCHEMA}.estoque_giro`)).rows);
+}
+function lerEntradas() {
+  return comConexao(async c => (await c.query(
+    `SELECT to_char(mes, 'YYYY-MM-DD') AS mes, codprod, qt::float8 AS qt, valor::float8 AS valor FROM ${SCHEMA}.entrada_mes`)).rows);
+}
+/* a conta corrente: o saldo de cada fornecedor somado no banco (os 43 mil lançamentos) e, linha a linha, só o que a tela
+   mostra (desde 2024) — é desse pedaço que saem a verba e a negociação do último trimestre fechado */
+function lerCC(desde) {
+  return comConexao(async c => {
+    const agregado = (await c.query(
+      `SELECT codfornec, max(fornecedor) AS fornecedor, max(codcomprador) AS codcomprador,
+              coalesce(sum(valor) FILTER (WHERE tipo = 'D'), 0)::float8 AS debito, coalesce(sum(valor) FILTER (WHERE tipo = 'C'), 0)::float8 AS credito
+         FROM ${SCHEMA}.cc_lancamento WHERE codfornec IS NOT NULL GROUP BY codfornec`)).rows;
+    const linhas = (await c.query(
+      `SELECT transacao::text AS transacao, to_char(data, 'YYYY-MM-DD') AS data, codfornec, tipo, coalesce(valor, 0)::float8 AS valor,
+              historico, numverba::text AS numverba, usuario, to_char(dtestorno, 'YYYY-MM-DD') AS dtestorno
+         FROM ${SCHEMA}.cc_lancamento WHERE codfornec IS NOT NULL AND data >= $1::date ORDER BY data, transacao`, [desde])).rows;
+    return { agregado, linhas };
+  });
+}
+function lerFotos() {
+  return comConexao(async c => (await c.query(`SELECT codprod, arquivo FROM ${SCHEMA}.produto_imagem`)).rows);
 }
 /* as linhas dos dias depois do corte do arquivo (venda_dia) e a venda por hora e RCA de hoje e do mesmo dia da semana
    passada (venda_hora). Valores em float8: o hoje.js passa para centavos como o ETL (round(x * 100)). */
@@ -195,4 +255,4 @@ async function fechar() {
 }
 
 module.exports = { carregarDoBanco, carregarDeArquivos, versaoNoAr, miniatura, fechar, acharEnv, variavel, versaoHoje, lerHoje, cadastros,
-                   pedirAtualizacao, lerPedido };
+                   pedirAtualizacao, lerPedido, versaoBases, lerPosicao, lerGiro, lerEntradas, lerCC, lerFotos };

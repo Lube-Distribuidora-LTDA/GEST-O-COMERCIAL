@@ -33,20 +33,46 @@ L.aplicarHoje = function (h) {
   L.HOJE = h && h.versao ? h : null;
   prepararDims();
 };
-/* pergunta ao servidor; true = a venda de hoje mudou (a tela redesenha). Carga nova do arquivo = recarrega a página. */
+/* pergunta ao servidor; true = a venda de hoje ou uma das bases mudou (a tela redesenha). Carga nova do arquivo =
+   recarrega a página. */
 L.sincronizarHoje = function () {
   return fetch("api/versao?hoje=1&_=" + Date.now(), { cache: "no-store" }).then(function (r) {
     if (!r.ok) throw new Error("versão: " + r.status);
     return r.json();
   }).then(function (m) {
     if (m.gerado_em && L.META && m.gerado_em !== L.META.gerado_em) { L.versaoMudou(); return false; }
-    var h = m.hoje || null;
-    if ((h ? h.versao : null) === (L.HOJE ? L.HOJE.versao : null) && (!h || h.dia === L.HOJE.dia)) return false;
-    L.aplicarHoje(h);
-    if (L.limparCacheConsulta) L.limparCacheConsulta();
-    return true;
+    var h = m.hoje || null, mudou = false;
+    if (!((h ? h.versao : null) === (L.HOJE ? L.HOJE.versao : null) && (!h || h.dia === L.HOJE.dia))) {
+      L.aplicarHoje(h);
+      if (L.limparCacheConsulta) L.limparCacheConsulta();
+      mudou = true;
+    }
+    return sincronizarBases(m.bases).then(function (mb) { return mudou || mb; },
+      function (e) { console.warn("estoque/conta corrente ao vivo:", e && e.message); return mudou; });
   });
 };
+
+/* ------------------------------ estoque, conta corrente, entradas e histórico ao vivo (AGENTE LUBE) ------------------------------
+   O agente lê o WinThor (estoque de minuto em minuto; giro, conta corrente e entradas de poucos em poucos minutos) e a
+   tarefa das fotos olha a pasta FOTOS_ION de 5 em 5 min. O servidor refaz os arquivos e diz em /api/versao a versão
+   (sha1) de cada um; a tela baixa de novo só o que mudou e redesenha no lugar. */
+L.BASES = null;
+var BASES = {
+  "estoque.json": function (j) { prepararEstoque(j); },
+  "cc.json": function (j) { prepararCC(j); },
+  "entradas.json": function (j) { L.ENT = j; },
+  "historico.json": function (j) { L.HIST = j; },
+};
+function sincronizarBases(b) {
+  if (b) L.BASES = b;
+  if (!b || !b.arquivos) return Promise.resolve(false);
+  var nomes = Object.keys(BASES).filter(function (n) { return b.arquivos[n] && b.arquivos[n] !== L.VERSOES[n]; });
+  if (!nomes.length) return Promise.resolve(false);
+  return Promise.all(nomes.map(function (n) { return L.carregarJson(n, b.arquivos[n]); })).then(function (js) {
+    js.forEach(function (j, i) { BASES[nomes[i]](j); });
+    return true;
+  });
+}
 /* a base da porcentagem com a venda de hoje nos totais: o período atual só com os dias fechados (decisão do Júlio,
    2026-10-27). R[id + "_f"] vem do L.pedidosCmp; sem a venda de hoje, não existe e a tela compara como sempre. */
 L.cmpFechado = function (R, id) { var f = R && R[id + "_f"]; return f ? L.derivar(f) : null; };
@@ -133,8 +159,8 @@ function prepararCC(j) {
   var fi = {}; D.fornecedores.forEach(function (f, i) { fi[f[0]] = i; });
   L.fornIdxDeCod = fi;
   L.CCF.forEach(function (o) { o.fidx = fi[o.cod] != null ? fi[o.cod] : -1; });
-  var cl = j.cols_l;
-  L.CCL = j.lancamentos.map(function (r) { var o = {}; cl.forEach(function (n, i) { o[n] = r[i]; }); o.fidx = fi[o.forn] != null ? fi[o.forn] : -1; o.usuarioNome = D.usuarios_cc[o.usuario]; return o; });
+  var cl = j.cols_l, us = j.usuarios || D.usuarios_cc;           // a conta corrente ao vivo traz a própria lista de quem lançou
+  L.CCL = j.lancamentos.map(function (r) { var o = {}; cl.forEach(function (n, i) { o[n] = r[i]; }); o.fidx = fi[o.forn] != null ? fi[o.forn] : -1; o.usuarioNome = us[o.usuario]; return o; });
 }
 
 /* ------------------------------ períodos e comparação ------------------------------ */

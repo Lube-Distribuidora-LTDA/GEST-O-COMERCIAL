@@ -16,6 +16,10 @@
  * A venda de hoje (hoje.js, desde 2026-10-27) é outra coisa: não troca o pacote nem recarrega a página. O servidor
  * pergunta a versão do AGENTE LUBE de 15 em 15 s (verificarHoje), põe as linhas de hoje por cima no motor e
  * responde cada consulta com `hoje` (a versão dessas linhas); a tela manda `vh`, a que ela conhece.
+ *
+ * O estoque, a conta corrente, as entradas e o histórico de hoje (bases.js, fases 2 e 3, 2026-10-27) também vêm do
+ * agente: verificarBases() troca no pacote em memória só o arquivo que mudou; a versão de cada um (sha1) vai no
+ * cabeçalho X-Versao e em /api/versao (bases.arquivos), e a tela baixa de novo só o que mudou.
  * ========================================================================== */
 "use strict";
 
@@ -24,6 +28,7 @@ const zlib = require("zlib");
 const { Motor } = require("./motor.js");
 const fonte = require("./fonte_dados.js");
 const hoje = require("./hoje.js");
+const bases = require("./bases.js");
 
 const DADOS = path.join(__dirname, "dados");
 const NA_VERCEL = !!process.env.VERCEL;
@@ -39,6 +44,8 @@ let verificando = null;
 let ultimaChecagem = 0;
 let verificandoHoje = null;
 let ultimaHoje = 0;
+let verificandoBases = null;
+let ultimaBases = 0;
 
 /* aquecimento: a primeira consulta depois de montar o motor paga a compilação do JavaScript (segundos).
    Rodar um conjunto típico de pedidos antes de o primeiro usuário chegar tira esse custo da frente dele. */
@@ -91,7 +98,7 @@ function carregar() {
           catch (e2) { console.error("sem dados nenhum:", e2.message, "— rode etl/sync_trade.py"); }
         }
       } finally { await soltarConexao(); }
-      if (pac) { instalar(pac); await verificarHoje(true); }
+      if (pac) { instalar(pac); await verificarHoje(true); await verificarBases(true); }
     })().finally(() => { carregamento = null; });
   }
   return carregamento;
@@ -115,6 +122,7 @@ async function verificar() {
         console.log(`versão nova no banco: ${v.versao}`);
         instalar(await fonte.carregarDoBanco());
         await verificarHoje(true);                    // o corte do arquivo novo é outro: a venda de hoje é montada de novo
+        await verificarBases(true);                   // e as bases, sobre os índices do arquivo novo
       }
     } catch (e) {
       if (e.message !== avisoBanco) console.error("[banco] não consegui checar a versão:", e.message);
@@ -142,12 +150,34 @@ function verificarHoje(forcar) {
 /* a tela já viu uma versão de hoje mais nova que a desta cópia do servidor (na Vercel há várias): atualiza antes */
 function precisaHoje(e, corpo) { return !!(corpo && corpo.vh && (!e.hoje || corpo.vh > e.hoje.versao)); }
 
+/* estoque, conta corrente, entradas e histórico de hoje (bases.js): mesma ideia da venda de hoje. Com o agente parado,
+   vale o arquivo da carga (as fotos, sempre a tabela). */
+function verificarBases(forcar) {
+  if (!estado || estado.origem !== "banco") return Promise.resolve();
+  if (verificandoBases) return verificandoBases;
+  if (forcar !== true && Date.now() - ultimaBases < 3000) return Promise.resolve();
+  const e = estado;
+  verificandoBases = (async () => {
+    try { await bases.atualizar(e, forcar === true); }
+    catch (err) { console.error("[bases] não consegui montar estoque/conta corrente/entradas ao vivo:", err.message); }
+    finally { ultimaBases = Date.now(); await soltarConexao(); }
+  })().finally(() => { verificandoBases = null; });
+  return verificandoBases;
+}
+/* a tela pediu a versão `h` de um arquivo e esta cópia tem outra: confere antes de responder (no máximo 1x a cada 2 s) */
+async function conferirBase(e, nome, h) {
+  if (!h || !bases.ARQUIVOS.includes(nome) || bases.versaoDe(e, nome) === h) return;
+  if (Date.now() - ultimaBases < 2000) return;
+  await verificarBases(true);
+}
+
 /* Vercel: função não tem relógio entre as requisições. Checa no máximo 1x por INTERVALO, depois de responder (waitUntil). */
 function agendarChecagem(waitUntil) {
   if (!estado) return;
   const ps = [];
   if (!verificando && Date.now() - ultimaChecagem >= INTERVALO_MS) { ultimaChecagem = Date.now(); ps.push(verificar()); }
   if (!verificandoHoje && Date.now() - ultimaHoje >= INTERVALO_HOJE_MS) { ultimaHoje = Date.now(); ps.push(verificarHoje()); }
+  if (!verificandoBases && Date.now() - ultimaBases >= INTERVALO_HOJE_MS) { ultimaBases = Date.now(); ps.push(verificarBases()); }
   if (ps.length && typeof waitUntil === "function") waitUntil(Promise.all(ps));
 }
 
@@ -170,7 +200,7 @@ function arquivoPublico(e, nome) {
   if (!PUBLICOS.has(nome) || !e.arquivos[nome]) return null;
   let gz = e.cacheGz.get(nome);
   if (!gz) { gz = zlib.gzipSync(e.arquivos[nome], { level: 6 }); e.cacheGz.set(nome, gz); }
-  return { bruto: e.arquivos[nome], gz };
+  return { bruto: e.arquivos[nome], gz, versao: bases.versaoDe(e, nome) };
 }
 
 function infoVersao(e, extra) {
@@ -179,10 +209,12 @@ function infoVersao(e, extra) {
     // a venda de hoje: a versão, até quando, e os clientes/produtos/RCAs/meses que o arquivo ainda não tem (a tela
     // acrescenta às listas dela, nos mesmos índices do motor)
     hoje: e.hoje || null,
+    // estoque, conta corrente, entradas e histórico ao vivo: a versão (sha1) de cada arquivo; a tela baixa o que mudou
+    bases: e.bases || null,
   });
 }
 
 function estadoAtual() { return estado; }
 
-module.exports = { garantir, carregar, verificar, verificarHoje, precisaHoje, agendarChecagem, responderConsulta, arquivoPublico, infoVersao,
-                   estadoAtual, PUBLICOS, NA_VERCEL, INTERVALO_MS, INTERVALO_HOJE_MS, DADOS };
+module.exports = { garantir, carregar, verificar, verificarHoje, precisaHoje, verificarBases, conferirBase, agendarChecagem, responderConsulta,
+                   arquivoPublico, infoVersao, estadoAtual, PUBLICOS, NA_VERCEL, INTERVALO_MS, INTERVALO_HOJE_MS, DADOS };

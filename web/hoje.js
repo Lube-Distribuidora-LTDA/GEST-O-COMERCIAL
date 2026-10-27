@@ -127,4 +127,4 @@ async function atualizar(e, forcar) {
   return true;
 }
 
-module.exports = { atualizar, diaSP, horaSP };
+module.exports = { atualizar, diaSP, horaSP, base };

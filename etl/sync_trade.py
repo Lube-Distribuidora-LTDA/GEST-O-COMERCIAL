@@ -28,8 +28,9 @@ Como usar
     python sync_trade.py --listar        # mostra os passos e sai
     python sync_trade.py --so-miniaturas --minutos-miniaturas 0   # só as fotos, sem Oracle e sem limite de tempo (1ª carga, à mão)
 
-Agendamento (ver 3 - INSTALACAO\\instalar_e_agendar.ps1): 5x ao dia, e é a tranca do banco que impede duas
-máquinas de carregarem ao mesmo tempo.
+Agendamento (ver 3 - INSTALACAO\\instalar_e_agendar.ps1): a carga inteira só às 06:25 desde 2026-10-27 (o estoque, a
+conta corrente e as entradas do dia vêm do AGENTE LUBE, ao vivo) e a tarefa "Trade - Fotos" (--so-miniaturas) de 5 em
+5 min, com tranca própria. É a tranca do banco que impede duas máquinas de carregarem ao mesmo tempo.
 """
 from __future__ import annotations
 
@@ -113,6 +114,10 @@ def main() -> int:
         log.warning("MODO --sem-gravar: nada vai ser escrito no banco.")
 
     resultados: list[tuple[str, str, int | None, float, str]] = []
+    # Só as fotos (a tarefa "Trade - Fotos", de 5 em 5 min desde 2026-10-27): o controle_carga leva "fotos_imagens" e
+    # "fotos_miniaturas", para o Guardião, que confere a carga grande pelos nomes "imagens" e "miniaturas", não tomar
+    # a rodada das fotos por uma carga pela metade.
+    prefixo = "fotos_" if args.so_miniaturas else ""
 
     def passo(conn_pg, nome: str, destino: str | None, fn, esperadas: int | None = None):
         """Roda um passo, cronometra, registra em controle_carga. Devolve (ok, valor)."""
@@ -126,7 +131,7 @@ def main() -> int:
             log.info("  %s — %s linhas em %.1fs%s", status, _fmt(linhas), seg, f" — {aviso}" if aviso else "")
             resultados.append((nome, status, linhas, seg, aviso or ""))
             if not args.sem_gravar:
-                gt.registrar(conn_pg, nome, destino, status, linhas, seg, aviso, esperadas)
+                gt.registrar(conn_pg, prefixo + nome, destino, status, linhas, seg, aviso, esperadas)
             return True, valor
         except Exception as exc:  # noqa: BLE001 — um passo que falha não pode deixar o banco pela metade
             try:
@@ -137,13 +142,15 @@ def main() -> int:
             log.exception("  FALHOU: %s", nome)
             resultados.append((nome, "ERRO", None, seg, f"{type(exc).__name__}: {exc}"))
             if not args.sem_gravar:
-                gt.registrar(conn_pg, nome, destino, "ERRO", None, seg, f"{type(exc).__name__}: {exc}", esperadas)
+                gt.registrar(conn_pg, prefixo + nome, destino, "ERRO", None, seg, f"{type(exc).__name__}: {exc}", esperadas)
             return False, None
 
     try:
         so_fotos = args.so_miniaturas
         ora_ctx = contextlib.nullcontext() if so_fotos else bi.conectar_oracle(cfg_ora)       # só as fotos não precisa do Oracle
-        with ora_ctx as conn_ora, bi.conectar_supabase(cfg_pg) as pg, bi.tranca_de_carga(pg, "carga"):
+        # As fotos têm tranca própria: a rodada de 5 em 5 min nunca pode fazer a carga grande ser pulada. As duas mexem
+        # em produto_imagem e produto_miniatura, mas só pela diferença e com upsert: rodar junto não estraga nada.
+        with ora_ctx as conn_ora, bi.conectar_supabase(cfg_pg) as pg, bi.tranca_de_carga(pg, "fotos" if so_fotos else "carga"):
             no_ar = gt.versao_no_ar(pg)
             meta_no_ar = (no_ar or {}).get("meta") or {}
             classif = fonte_classif = cru = ora = pacote = None
@@ -186,7 +193,8 @@ def main() -> int:
                 if do_banco and len(mapa) < 0.5 * len(do_banco):
                     return len(do_banco), f"a pasta listou só {len(mapa)} fotos (no banco: {len(do_banco)}): mantive o mapa do banco", (do_banco, "banco")
                 if not args.sem_gravar:
-                    gt.gravar_imagens(pg, mapa)
+                    n = gt.gravar_imagens(pg, mapa, do_banco)
+                    log.info("  %s foto(s) nova(s), trocada(s) ou que saíram da pasta", _fmt(n))
                 return len(mapa), None, (mapa, str(pasta))
             ok, val = passo(pg, "imagens", f"{gt.SCHEMA}.produto_imagem", f_imagens)
             imagens, fonte_imagens = val if ok else (None, None)
@@ -280,7 +288,7 @@ def main() -> int:
         # Não é erro: é a tranca fazendo o trabalho dela.
         log.warning("%s", aviso)
         if not args.sem_gravar:
-            _registrar_pulada(cfg_pg)
+            _registrar_pulada(cfg_pg, "fotos" if args.so_miniaturas else "carga")
         return 0
     except Exception:
         log.exception("Não consegui nem abrir as conexões — nada foi carregado.")
@@ -294,13 +302,13 @@ def main() -> int:
     return 0
 
 
-def _registrar_pulada(cfg_pg) -> None:
+def _registrar_pulada(cfg_pg, grupo: str = "carga") -> None:
     """A carga foi pulada porque outra já estava rodando. Isso não deixava rastro nenhum no banco (em 2026-10-16 a das
     12:25 simplesmente não apareceu, e ninguém soube dizer por quê): agora vira uma linha AVISO no controle_carga,
     com a máquina e a conta. Registrar o aviso nunca derruba nada."""
     try:
         with bi.conectar_supabase(cfg_pg) as pg:
-            gt.registrar(pg, "carga", None, "AVISO", 0, 0.0, f"carga pulada: já havia outra rodando ({_quem()})")
+            gt.registrar(pg, grupo, None, "AVISO", 0, 0.0, f"{grupo} pulada: já havia outra rodando ({_quem()})")
     except Exception:  # noqa: BLE001
         log.warning("Não consegui registrar no banco que a carga foi pulada.")
 
