@@ -380,13 +380,11 @@ table.tabela { border-collapse: separate; border-spacing: 0; width: 100%; font: 
 .espera .relogio { font: 800 20px var(--f-num); color: var(--ouro); margin-top: 4px; }
 .espera-txt { font: 600 13.5px var(--f-txt); letter-spacing: .01em; }
 
-/* caminhão da Lube na espera: estrada correndo, rodas girando, painéis caindo no baú */
+/* caminhão da Lube na espera (a foto do Painel Corporativo): estrada correndo, vento e painéis caindo no baú */
 .cam-cena { width: min(100%, 440px); margin: 0 auto; }
 .cam-cena svg { width: 100%; height: auto; display: block; overflow: visible; }
-.cam-corpo { animation: cam-bob .36s ease-in-out infinite alternate; }
-@keyframes cam-bob { from { transform: translateY(0); } to { transform: translateY(-2.5px); } }
-.cam-raio { transform-box: fill-box; transform-origin: 50% 50%; animation: cam-gira .5s linear infinite; }
-@keyframes cam-gira { to { transform: rotate(360deg); } }
+.cam-corpo { animation: cam-bob 1.1s ease-in-out infinite alternate; }
+@keyframes cam-bob { from { transform: translateY(0); } to { transform: translateY(-3px); } }
 .cam-estrada { animation: cam-corre .5s linear infinite; }
 @keyframes cam-corre { to { stroke-dashoffset: -52; } }
 .cam-vento line { animation: cam-vento .7s linear infinite; }
@@ -402,7 +400,7 @@ table.tabela { border-collapse: separate; border-spacing: 0; width: 100%; font: 
 .cam-pulso { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; animation: cam-brilho 3.6s ease-out infinite; animation-delay: var(--d, 0s); }
 @keyframes cam-brilho { 0%, 52% { opacity: 0; transform: scale(.25); } 56% { opacity: .95; transform: scale(.45); } 78% { opacity: 0; transform: scale(1.25); } 100% { opacity: 0; transform: scale(1.25); } }
 @media (prefers-reduced-motion: reduce) {
-  .cam-corpo, .cam-raio, .cam-estrada, .cam-vento line, .cam-pulso { animation: none; }
+  .cam-corpo, .cam-estrada, .cam-vento line, .cam-pulso { animation: none; }
   .cam-painel { animation: none; opacity: 1; transform: translateY(-14px); }
 }
 .vazio { padding: 36px 18px; text-align: center; color: var(--t3); font: 500 13px var(--f-txt); }
