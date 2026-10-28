@@ -8,15 +8,38 @@
 var L = window.L;
 
 /* ------------------------------ carga ------------------------------ */
+var ARQUIVOS_ABERTURA = ["dims.json", "estoque.json", "entradas.json", "cc.json", "historico.json", "meta.json"];
+/* A abertura: os 6 arquivos e a versão do servidor numa chamada só (/api/abertura). Antes eram 6 chamadas, depois
+   /api/versao, depois a 1ª consulta, e na Vercel cada passo podia cair numa cópia fria do servidor (~7 s), uma depois
+   da outra (~23 s até aparecer o dado). Se a abertura não responder, cai no jeito antigo: um arquivo por chamada. */
+function abrirUmaChamada() {
+  return fetch("api/abertura").then(function (r) {
+    if (!r.ok) throw new Error("abertura: " + r.status);
+    return r.json();
+  }).then(function (a) {
+    ARQUIVOS_ABERTURA.forEach(function (n) { L.VERSOES[n] = a.versoes[n]; });
+    return { arq: a.arquivos, info: a.info };
+  });
+}
+function abrirUmPorUm() {
+  return Promise.all(ARQUIVOS_ABERTURA.map(function (n) { return L.carregarJson(n); })).then(function (r) {
+    var arq = {}; ARQUIVOS_ABERTURA.forEach(function (n, i) { arq[n] = r[i]; });
+    return { arq: arq, info: null };
+  });
+}
 L.carregarTudo = function () {
-  return Promise.all([L.carregarJson("dims.json"), L.carregarJson("estoque.json"), L.carregarJson("entradas.json"),
-                      L.carregarJson("cc.json"), L.carregarJson("historico.json"), L.carregarJson("meta.json")])
-    .then(function (r) {
-      L.D = r[0]; L.META = r[5]; L.HIST = r[4]; L.ENT = r[2];
-      L.DBASE = { clientes: L.D.clientes.length, produtos: L.D.produtos.length, rcas: L.D.rcas.length, equipes: L.D.equipes.length, meses: L.D.meses.length };
-      prepararDims(); prepararEstoque(r[1]); prepararCC(r[3]);
-      return L.sincronizarHoje().catch(function (e) { console.warn("venda de hoje:", e && e.message); });
-    });
+  return abrirUmaChamada().catch(function (e) {
+    console.warn("abertura numa chamada só falhou, baixando os arquivos um a um:", e && e.message);
+    return abrirUmPorUm();
+  }).then(function (a) {
+    var arq = a.arq;
+    L.D = arq["dims.json"]; L.META = arq["meta.json"]; L.HIST = arq["historico.json"]; L.ENT = arq["entradas.json"];
+    L.DBASE = { clientes: L.D.clientes.length, produtos: L.D.produtos.length, rcas: L.D.rcas.length, equipes: L.D.equipes.length, meses: L.D.meses.length };
+    prepararDims(); prepararEstoque(arq["estoque.json"]); prepararCC(arq["cc.json"]);
+    // com a abertura a versão do servidor já veio junto; no jeito antigo ainda se pergunta
+    var v = a.info ? L.aplicarVersaoServidor(a.info) : L.sincronizarHoje();
+    return v.catch(function (e) { console.warn("venda de hoje:", e && e.message); });
+  });
 };
 
 /* ------------------------------ a venda de hoje (AGENTE LUBE) ------------------------------
@@ -39,17 +62,19 @@ L.sincronizarHoje = function () {
   return fetch("api/versao?hoje=1&_=" + Date.now(), { cache: "no-store" }).then(function (r) {
     if (!r.ok) throw new Error("versão: " + r.status);
     return r.json();
-  }).then(function (m) {
-    if (m.gerado_em && L.META && m.gerado_em !== L.META.gerado_em) { L.versaoMudou(); return false; }
-    var h = m.hoje || null, mudou = false;
-    if (!((h ? h.versao : null) === (L.HOJE ? L.HOJE.versao : null) && (!h || h.dia === L.HOJE.dia))) {
-      L.aplicarHoje(h);
-      if (L.limparCacheConsulta) L.limparCacheConsulta();
-      mudou = true;
-    }
-    return sincronizarBases(m.bases).then(function (mb) { return mudou || mb; },
-      function (e) { console.warn("estoque/conta corrente ao vivo:", e && e.message); return mudou; });
-  });
+  }).then(L.aplicarVersaoServidor);
+};
+/* o que /api/versao diz (ou a abertura traz em `info`): vale a venda de hoje e as bases; true = mudou algo, a tela redesenha */
+L.aplicarVersaoServidor = function (m) {
+  if (m.gerado_em && L.META && m.gerado_em !== L.META.gerado_em) { L.versaoMudou(); return Promise.resolve(false); }
+  var h = m.hoje || null, mudou = false;
+  if (!((h ? h.versao : null) === (L.HOJE ? L.HOJE.versao : null) && (!h || h.dia === L.HOJE.dia))) {
+    L.aplicarHoje(h);
+    if (L.limparCacheConsulta) L.limparCacheConsulta();
+    mudou = true;
+  }
+  return sincronizarBases(m.bases).then(function (mb) { return mudou || mb; },
+    function (e) { console.warn("estoque/conta corrente ao vivo:", e && e.message); return mudou; });
 };
 
 /* ------------------------------ estoque, conta corrente, entradas e histórico ao vivo (AGENTE LUBE) ------------------------------

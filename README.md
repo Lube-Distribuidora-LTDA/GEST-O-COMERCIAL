@@ -213,9 +213,11 @@ sistema sem o guarda: ele mostra venda por cliente e por RCA.**
 ```
 navegador ──► Vercel (guarda da Sentinela: sem login do Painel Lube, nada passa)
               ├─ web/ (HTML, CSS, JS)                 estático
-              ├─ /api/consulta   (POST)               motor em memória (web/motor.js)
-              ├─ /api/versao                          carimbo da carga e origem dos dados
-              └─ /dados/<nome>.json  → /api/dados     as bases pequenas (dims, estoque, entradas, conta corrente, histórico)
+              └─ api/motor.js (UMA função, ?r= escolhe a rota; as URLs vêm de rewrites do vercel.json)
+                   ├─ /api/abertura               a abertura da tela: as 6 bases pequenas + a versão, numa resposta só (1,6 MB gzip, ETag)
+                   ├─ /api/consulta   (POST)      motor em memória (web/motor.js)
+                   ├─ /api/versao                 carimbo da carga e origem dos dados
+                   └─ /dados/<nome>.json          uma das bases pequenas (a tela só usa se a abertura falhar, e nas atualizações ao vivo)
                          │
                          └──► Supabase DATA WAREHOUSE, schema trade  (o pacote que o ETL grava; ver "Como funciona")
 ```
@@ -263,6 +265,7 @@ quem tem "Todos os sistemas" abriria automaticamente. Para isolar, o painel admi
 ## Histórico de mudanças
 Tudo o que mudou neste sistema, do mais novo para o mais antigo.
 
+- **2026-10-28** — Abertura mais rápida (Claude, a pedido do Júlio): `api/consulta`, `api/versao` e `api/dados` viraram UMA função (`api/motor.js`) e a tela abre com UMA chamada (`/api/abertura`). Antes, cada passo da abertura caía numa cópia fria do servidor (~7 s: ler o pacote do banco e montar o motor), um depois do outro (~23 s medidos nos logs da Vercel); agora é uma partida a frio. O aquecimento do motor passou de 3 rodadas para 1 (a 1ª consulta leva os mesmos ~240 ms).
 - **2026-10-14** — Preparado para a Vercel (Claude, a pedido do Júlio): `web/pacote.js` compartilhado, funções `api/consulta`, `api/versao` e `api/dados`, guarda da Sentinela, `vercel.json`, e a tela passa a recusar (409) consulta de versão antiga.
 - **2026-10-14** — Ligado ao DATA WAREHOUSE e à pasta de fotos (Claude, a pedido do Júlio): schema `trade` (10 tabelas, RLS
   ligada), `sync_trade.py` + `gravar_trade.py` + `fotos.py` + `diagnostico_trade.py`, servidor lendo o pacote do banco

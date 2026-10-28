@@ -2,13 +2,14 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["gru1"],
   "functions": {
-    "api/consulta.js": { "maxDuration": 60 },
-    "api/versao.js": { "maxDuration": 60 },
-    "api/dados.js": { "maxDuration": 60 },
+    "api/motor.js": { "maxDuration": 60 },
     "api/img.js": { "maxDuration": 15 }
   },
   "rewrites": [
-    { "source": "/dados/:nome", "destination": "/api/dados?nome=:nome" },
+    { "source": "/dados/:nome", "destination": "/api/motor?r=dados&nome=:nome" },
+    { "source": "/api/abertura", "destination": "/api/motor?r=abertura" },
+    { "source": "/api/versao", "destination": "/api/motor?r=versao" },
+    { "source": "/api/consulta", "destination": "/api/motor?r=consulta" },
     { "source": "/img/:cod", "destination": "/api/img?cod=:cod" }
   ],
   "headers": [

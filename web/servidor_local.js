@@ -175,6 +175,14 @@ http.createServer(async (req, res) => {
       const w = Math.min(1200, Math.max(64, Math.round((+url.searchParams.get("w") || 480) / 16) * 16));
       return servirFoto(res, +mi[1], w);
     }
+    if (url.pathname === "/api/abertura") {                              // a abertura da tela numa resposta só (ver pacote.js)
+      if (!P.estadoAtual() || !/gzip/.test(req.headers["accept-encoding"] || "")) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end('{"erro":"sem dados"}'); }
+      await Promise.all([P.verificarHoje(), P.verificarBases()]);
+      const a = P.abertura(P.estadoAtual(), { fotos: pastaFotos() ? "ok" : "pasta FOTOS_ION fora do ar" });
+      const h = { "Content-Type": "application/json; charset=utf-8", "Content-Encoding": "gzip", "Vary": "Accept-Encoding", "Cache-Control": "no-cache", "ETag": a.etag };
+      if (req.headers["if-none-match"] === a.etag) { res.writeHead(304, h); return res.end(); }
+      res.writeHead(200, h); return res.end(a.gz);
+    }
     if (url.pathname === "/api/versao") {
       if (url.searchParams.get("verificar")) await P.verificar();          // botão "atualizar": pergunta ao banco agora
       if (url.searchParams.get("verificar") || url.searchParams.get("hoje")) await Promise.all([P.verificarHoje(), P.verificarBases()]);   // a venda de hoje e as bases

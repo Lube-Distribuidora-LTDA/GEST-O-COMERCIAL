@@ -57,7 +57,9 @@ function aquecer(motor) {
     ...["uf", "equipe", "depto", "fornecedor", "categoria", "ramo", "origem", "comprador"].map(por => ({ id: por, tipo: "agrupar", por, dist: ["pos"], limite: 12 })),
     { id: "p", tipo: "agrupar", por: "produto", dist: ["pos"], limite: 20 }, { id: "c", tipo: "agrupar", por: "cliente", dist: ["skus"], limite: 20 },
     { id: "abc", tipo: "abc", por: "produto", limite: 5 }];
-  for (let i = 0; i < 3; i++) motor.consultar({ filtros: { ano: [ano] }, pedidos: ped });
+  // uma rodada basta (medido em 2026-10-28: com 1, 2 ou 3 rodadas a 1ª consulta de verdade leva os mesmos ~240 ms); eram 3 e
+  // custavam ~1,5 s a mais em toda partida a frio da Vercel
+  motor.consultar({ filtros: { ano: [ano] }, pedidos: ped });
   motor.cacheFiltro.clear(); motor._ef && motor._ef.clear();
   motor.resolver({});
   console.log(`motor aquecido em ${Date.now() - t} ms`);
@@ -214,7 +216,31 @@ function infoVersao(e, extra) {
   });
 }
 
+/* a abertura da tela numa resposta só: os 6 arquivos pequenos (dims, estoque, entradas, cc, historico, meta), a versão de cada
+   um e o mesmo que /api/versao diz (hoje e bases). Antes a tela pedia 6 arquivos, depois /api/versao, depois /api/consulta, e
+   na Vercel cada passo caía numa cópia fria do servidor (~7 s: ler o pacote do banco e montar o motor), um depois do outro.
+   Os arquivos já são JSON: a resposta é montada colando o texto deles (sem ler e escrever de novo) e comprimida uma vez só,
+   até algo mudar (a chave é a versão de cada arquivo mais o que /api/versao diz). Devolve { gz, etag }. */
+const ABERTURA = ["dims.json", "estoque.json", "entradas.json", "cc.json", "historico.json", "meta.json"];
+function abertura(e, extra) {
+  const versoes = {};
+  for (const n of ABERTURA) versoes[n] = bases.versaoDe(e, n);
+  const cab = '{"info":' + JSON.stringify(infoVersao(e, extra)) + ',"versoes":' + JSON.stringify(versoes) + ',"arquivos":{';
+  const chave = cab;
+  const guardada = e.cacheGz.get("abertura");
+  if (guardada && guardada.chave === chave) return guardada;
+  const partes = [cab];
+  ABERTURA.forEach((n, i) => { partes.push((i ? "," : "") + JSON.stringify(n) + ":", e.arquivos[n]); });
+  partes.push("}}");
+  const bruto = Buffer.concat(partes.map(p => Buffer.isBuffer(p) ? p : Buffer.from(p, "utf8")));
+  const gz = zlib.gzipSync(bruto, { level: 5 });
+  const etag = '"' + require("crypto").createHash("sha1").update(gz).digest("hex").slice(0, 20) + '"';
+  const r = { chave, gz, etag };
+  e.cacheGz.set("abertura", r);
+  return r;
+}
+
 function estadoAtual() { return estado; }
 
 module.exports = { garantir, carregar, verificar, verificarHoje, precisaHoje, verificarBases, conferirBase, agendarChecagem, responderConsulta,
-                   arquivoPublico, infoVersao, estadoAtual, PUBLICOS, NA_VERCEL, INTERVALO_MS, INTERVALO_HOJE_MS, DADOS };
+                   arquivoPublico, infoVersao, abertura, estadoAtual, PUBLICOS, NA_VERCEL, INTERVALO_MS, INTERVALO_HOJE_MS, DADOS };
